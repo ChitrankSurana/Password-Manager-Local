@@ -1,0 +1,3 @@
+# This file ensures the backups directory is maintained in version control
+# while preventing the actual backup files from being committed.
+# The password manager will create backup files in this directory.

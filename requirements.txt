@@ -1,0 +1,44 @@
+# Core Dependencies
+# ==================
+
+# Encryption and Security
+cryptography>=41.0.0          # AES-256 encryption, PBKDF2 key derivation, secure random generation
+bcrypt>=4.0.0                  # Secure password hashing for user authentication
+
+# GUI Framework
+customtkinter>=5.2.0           # Modern, customizable GUI framework with Windows 11 styling
+pillow>=10.0.0                 # Image processing for GUI icons and themes
+
+# Database
+# sqlite3 is built into Python, no external dependency needed
+
+# Utilities
+pyperclip>=1.8.0              # Clipboard operations for copy/paste functionality
+zxcvbn>=4.4.28                # Advanced password strength checking and analysis
+python-dateutil>=2.8.0        # Date parsing and manipulation for backup timestamps
+
+# Web Interface
+flask>=2.3.0                  # Lightweight web framework for web interface
+flask-session>=0.5.0          # Session management for web interface security
+jinja2>=3.1.0                 # Template engine for HTML generation
+werkzeug>=2.3.0               # WSGI utilities and development server
+
+# Cloud Sync (Optional Features)
+requests>=2.31.0              # HTTP library for cloud storage API interactions
+google-api-python-client>=2.100.0  # Google Drive API integration (optional)
+dropbox>=11.36.0              # Dropbox API integration (optional)
+
+# Testing and Development
+pytest>=7.4.0                # Testing framework for unit and integration tests
+pytest-cov>=4.1.0            # Test coverage reporting
+black>=23.7.0                 # Code formatting (development)
+flake8>=6.0.0                 # Linting and style checking (development)
+
+# Import/Export Support
+pandas>=2.1.0                 # Data manipulation for CSV import/export
+openpyxl>=3.1.0              # Excel file support for import/export
+lxml>=4.9.0                   # XML processing for various password manager formats
+
+# System Integration
+psutil>=5.9.0                 # System information for dependency checking
+packaging>=23.1               # Version parsing for dependency verification

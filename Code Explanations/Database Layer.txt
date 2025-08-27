@@ -1,0 +1,299 @@
+DATABASE LAYER - DETAILED CODE EXPLANATION
+==========================================
+
+This document provides a comprehensive explanation of the database layer implementation
+for the Personal Password Manager, covering design decisions, security measures,
+and functionality details.
+
+OVERVIEW:
+---------
+The database layer (src/core/database.py) handles all data persistence operations
+using SQLite as the backend database. It provides secure user management, password
+storage with encryption support, and robust error handling.
+
+KEY DESIGN PRINCIPLES:
+---------------------
+
+1. SECURITY FIRST
+   - All user passwords are hashed using bcrypt with additional salts
+   - Account lockout prevents brute force attacks
+   - SQL injection prevention through prepared statements
+   - Foreign key constraints ensure data integrity
+   - Sensitive data never logged
+
+2. THREAD SAFETY
+   - Threading locks prevent race conditions
+   - Context managers ensure proper connection cleanup
+   - WAL mode enables better concurrent access
+
+3. ERROR HANDLING
+   - Custom exception classes for different error types
+   - Comprehensive logging for debugging and monitoring
+   - Graceful degradation on errors
+
+4. PERFORMANCE
+   - Proper database indexing for fast queries
+   - Connection pooling through context managers
+   - Efficient batch operations
+
+DATABASE SCHEMA:
+---------------
+
+USERS TABLE:
+- user_id: Primary key, auto-incrementing integer
+- username: Unique username (case-insensitive, trimmed)
+- password_hash: bcrypt hash of (password + salt)
+- salt: Additional security salt (64 hex characters)
+- created_at: Account creation timestamp
+- last_login: Last successful login timestamp
+- failed_attempts: Count of failed login attempts
+- locked_until: Account lockout expiration time
+- is_active: Account status flag
+
+PASSWORDS TABLE:
+- entry_id: Primary key, auto-incrementing integer
+- user_id: Foreign key to users table (CASCADE DELETE)
+- website: Website/service name (indexed for fast searches)
+- username: Username for the service
+- password_encrypted: AES-256 encrypted password (BLOB)
+- remarks: User notes/comments about the entry
+- created_at: Entry creation timestamp
+- modified_at: Last modification timestamp (auto-updated)
+- is_favorite: Boolean flag for favorite entries
+
+INDEXES:
+- idx_passwords_user_website: Composite index (user_id, website)
+- idx_passwords_user_id: Single index on user_id
+- idx_users_username: Single index on username
+
+CLASS STRUCTURE:
+---------------
+
+DatabaseManager CLASS:
+The main class handling all database operations with these key methods:
+
+INITIALIZATION (__init__):
+- Sets up database path and security parameters
+- Creates database directory if needed
+- Initializes schema and tables
+- Configures thread locking for safety
+
+CONNECTION MANAGEMENT (get_connection):
+- Context manager for database connections
+- Enables foreign key constraints and WAL mode
+- Provides proper error handling and cleanup
+- Thread-safe with locking mechanism
+
+USER MANAGEMENT:
+
+create_user(username, password):
+- Validates username and password requirements
+- Checks for existing usernames (case-insensitive)
+- Generates secure random salt (32 bytes)
+- Hashes password using bcrypt with 12 rounds
+- Creates new user record with timestamps
+- Returns user_id for successful creation
+
+authenticate_user(username, password):
+- Retrieves user information by username
+- Checks account status (active/inactive)
+- Handles account lockout logic:
+  * Checks if account is currently locked
+  * Unlocks if lockout period expired
+  * Locks account after max failed attempts
+- Verifies password using bcrypt
+- Updates login timestamps and resets failure counters
+- Returns user information (without sensitive data)
+
+PASSWORD ENTRY MANAGEMENT:
+
+add_password_entry(user_id, website, username, encrypted_password, remarks):
+- Validates all input parameters
+- Verifies user exists in database
+- Stores encrypted password as binary blob
+- Records creation timestamp
+- Returns entry_id for new password entry
+
+get_password_entries(user_id, website=None):
+- Retrieves all password entries for a user
+- Optional filtering by website (case-insensitive partial match)
+- Returns complete entry information including metadata
+- Ordered by website then username for consistency
+
+update_password_entry(entry_id, user_id, ...):
+- Verifies user owns the entry (security check)
+- Supports partial updates (only specified fields)
+- Updates modification timestamp automatically
+- Returns success/failure status
+
+delete_password_entry(entry_id, user_id):
+- Verifies user owns the entry (security check)
+- Permanently removes entry from database
+- Returns success/failure status
+
+UTILITY METHODS:
+
+get_user_statistics(user_id):
+- Calculates total password entries
+- Counts favorite entries
+- Counts unique websites
+- Finds most recent entry date
+- Returns comprehensive statistics dictionary
+
+backup_database(backup_path=None):
+- Creates consistent database backup
+- Uses SQLite's built-in backup API
+- Generates timestamped backup files
+- Ensures backup directory exists
+- Returns path to created backup file
+
+SECURITY FEATURES:
+-----------------
+
+PASSWORD HASHING:
+- Uses bcrypt with 12 rounds (computationally expensive)
+- Additional custom salt for extra security
+- Salt stored separately from hash
+- Timing-attack resistant verification
+
+ACCOUNT LOCKOUT:
+- Configurable maximum failed attempts (default: 5)
+- Configurable lockout duration (default: 30 minutes)
+- Automatic unlock after timeout period
+- Failed attempt counter reset on successful login
+
+SQL INJECTION PREVENTION:
+- All queries use prepared statements with parameters
+- Input validation and sanitization
+- No dynamic SQL string construction
+- Parameterized queries for all user input
+
+THREAD SAFETY:
+- Threading locks prevent concurrent access issues
+- Context managers ensure proper resource cleanup
+- SQLite WAL mode for better concurrency
+- Atomic operations for critical sections
+
+LOGGING AND MONITORING:
+- Comprehensive logging of all operations
+- Security events logged (failed logins, lockouts)
+- Error tracking for debugging
+- No sensitive data in logs
+
+ERROR HANDLING:
+--------------
+
+CUSTOM EXCEPTIONS:
+- DatabaseError: General database operation failures
+- UserNotFoundError: Specific user lookup failures
+- UserAlreadyExistsError: Username collision errors
+- AccountLockedError: Account lockout situations
+
+ERROR RECOVERY:
+- Graceful handling of connection failures
+- Automatic retry mechanisms where appropriate
+- Detailed error messages for debugging
+- Rollback transactions on failures
+
+PERFORMANCE OPTIMIZATIONS:
+-------------------------
+
+DATABASE DESIGN:
+- Strategic indexing for common queries
+- Efficient foreign key relationships
+- Minimal redundant data storage
+
+QUERY OPTIMIZATION:
+- Prepared statements for repeated queries
+- Batch operations where possible
+- Efficient JOIN operations
+- Selective column retrieval
+
+CONNECTION MANAGEMENT:
+- Context managers for automatic cleanup
+- Connection reuse within transactions
+- Timeout configuration for responsiveness
+
+MAINTENANCE FEATURES:
+--------------------
+
+SCHEMA VERSIONING:
+- database_metadata table tracks schema version
+- Migration support for future updates
+- Backward compatibility considerations
+
+BACKUP AND RESTORE:
+- Consistent backup creation using SQLite API
+- Automated backup file naming with timestamps
+- Backup verification and integrity checks
+
+MONITORING:
+- Database health check functions
+- Statistics and metrics collection
+- Performance monitoring capabilities
+
+USAGE EXAMPLES:
+--------------
+
+BASIC USAGE:
+```python
+# Create database manager
+db = DatabaseManager("data/passwords.db")
+
+# Create a new user
+user_id = db.create_user("john_doe", "secure_password123")
+
+# Authenticate user
+user_info = db.authenticate_user("john_doe", "secure_password123")
+
+# Add password entry (encrypted_password would come from encryption module)
+entry_id = db.add_password_entry(
+    user_id=user_id,
+    website="example.com",
+    username="john@example.com",
+    encrypted_password=b"encrypted_data_here",
+    remarks="My main email account"
+)
+
+# Retrieve entries
+entries = db.get_password_entries(user_id, website="example")
+```
+
+ERROR HANDLING:
+```python
+try:
+    user_id = db.create_user("existing_user", "password")
+except UserAlreadyExistsError:
+    print("Username already taken")
+except ValueError as e:
+    print(f"Invalid input: {e}")
+except DatabaseError as e:
+    print(f"Database error: {e}")
+```
+
+BEST PRACTICES:
+--------------
+
+1. Always use context managers for database operations
+2. Handle specific exceptions appropriately
+3. Validate input before database operations
+4. Use prepared statements for all queries
+5. Log security-relevant events
+6. Regular database backups
+7. Monitor failed authentication attempts
+8. Keep database schema versions updated
+
+FUTURE ENHANCEMENTS:
+-------------------
+
+1. Connection pooling for high-load scenarios
+2. Database encryption at rest
+3. Audit logging for compliance
+4. Performance metrics collection
+5. Automatic schema migrations
+6. Database replication support
+7. Advanced backup scheduling
+8. Query optimization analysis
+
+This database layer provides a solid foundation for the password manager
+with enterprise-level security, reliability, and maintainability features.

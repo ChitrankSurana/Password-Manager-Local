@@ -1,0 +1,3 @@
+# This file ensures the data directory is maintained in version control
+# while preventing the actual database files from being committed.
+# The password manager will create database files in this directory.

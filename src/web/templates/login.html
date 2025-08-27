@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Personal Password Manager{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <div class="auth-logo">
+                <i class="fas fa-shield-alt"></i>
+            </div>
+            <h1>Personal Password Manager</h1>
+            <p>Secure password management for everyone</p>
+        </div>
+        
+        <div class="auth-tabs">
+            <button class="tab-button active" onclick="switchTab('login')">Login</button>
+            <button class="tab-button" onclick="switchTab('register')">Register</button>
+        </div>
+        
+        <!-- Login Form -->
+        <div id="loginForm" class="auth-form active">
+            <form method="POST" action="{{ url_for('login') }}">
+                <div class="form-group">
+                    <label for="loginUsername">
+                        <i class="fas fa-user"></i>
+                        Username
+                    </label>
+                    <input 
+                        type="text" 
+                        id="loginUsername" 
+                        name="username" 
+                        required 
+                        autocomplete="username"
+                        placeholder="Enter your username"
+                    >
+                </div>
+                
+                <div class="form-group">
+                    <label for="loginPassword">
+                        <i class="fas fa-lock"></i>
+                        Master Password
+                    </label>
+                    <div class="password-input-group">
+                        <input 
+                            type="password" 
+                            id="loginPassword" 
+                            name="password" 
+                            required 
+                            autocomplete="current-password"
+                            placeholder="Enter your master password"
+                        >
+                        <button type="button" class="password-toggle" onclick="togglePassword('loginPassword')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-sign-in-alt"></i>
+                    Login
+                </button>
+            </form>
+            
+            <div class="auth-info">
+                <div class="security-notice">
+                    <i class="fas fa-shield-alt"></i>
+                    <span>Your master password is never stored and encrypts all your data</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Register Form -->
+        <div id="registerForm" class="auth-form">
+            <form method="POST" action="{{ url_for('register') }}">
+                <div class="form-group">
+                    <label for="registerUsername">
+                        <i class="fas fa-user"></i>
+                        Username
+                    </label>
+                    <input 
+                        type="text" 
+                        id="registerUsername" 
+                        name="username" 
+                        required 
+                        autocomplete="username"
+                        placeholder="Choose a username"
+                        pattern="[a-zA-Z0-9_]{3,20}"
+                        title="Username must be 3-20 characters, letters, numbers, and underscores only"
+                    >
+                    <small class="form-help">3-20 characters, letters, numbers, and underscores only</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="registerPassword">
+                        <i class="fas fa-lock"></i>
+                        Master Password
+                    </label>
+                    <div class="password-input-group">
+                        <input 
+                            type="password" 
+                            id="registerPassword" 
+                            name="password" 
+                            required 
+                            autocomplete="new-password"
+                            placeholder="Create a strong master password"
+                            minlength="8"
+                            oninput="checkPasswordStrength(this.value)"
+                        >
+                        <button type="button" class="password-toggle" onclick="togglePassword('registerPassword')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="password-strength" id="passwordStrength" style="display: none;">
+                        <div class="strength-bar">
+                            <div class="strength-fill"></div>
+                        </div>
+                        <div class="strength-text"></div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="confirmPassword">
+                        <i class="fas fa-lock"></i>
+                        Confirm Password
+                    </label>
+                    <div class="password-input-group">
+                        <input 
+                            type="password" 
+                            id="confirmPassword" 
+                            name="confirm_password" 
+                            required 
+                            autocomplete="new-password"
+                            placeholder="Confirm your master password"
+                            oninput="checkPasswordMatch()"
+                        >
+                        <button type="button" class="password-toggle" onclick="togglePassword('confirmPassword')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div id="passwordMatch" class="password-match" style="display: none;"></div>
+                </div>
+                
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="agreeTerms" required>
+                        <label for="agreeTerms">
+                            I understand that my master password cannot be recovered if forgotten
+                        </label>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn-primary" id="registerBtn" disabled>
+                    <i class="fas fa-user-plus"></i>
+                    Create Account
+                </button>
+            </form>
+            
+            <div class="auth-info">
+                <div class="security-notice">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span><strong>Important:</strong> Your master password cannot be recovered. Make sure to remember it!</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Features Section -->
+        <div class="features-section">
+            <h3>Why Choose Our Password Manager?</h3>
+            <div class="features-grid">
+                <div class="feature-item">
+                    <i class="fas fa-shield-alt"></i>
+                    <h4>Military-Grade Security</h4>
+                    <p>AES-256 encryption keeps your passwords safe</p>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-home"></i>
+                    <h4>Local Storage</h4>
+                    <p>All data stays on your computer</p>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-mobile-alt"></i>
+                    <h4>Cross-Platform</h4>
+                    <p>Works on Windows, Mac, and Linux</p>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-download"></i>
+                    <h4>Backup & Export</h4>
+                    <p>Never lose your passwords</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function switchTab(tab) {
+    // Update tab buttons
+    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+    document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
+    
+    // Update forms
+    document.querySelectorAll('.auth-form').forEach(form => form.classList.remove('active'));
+    document.getElementById(tab + 'Form').classList.add('active');
+}
+
+function togglePassword(inputId) {
+    const input = document.getElementById(inputId);
+    const button = input.nextElementSibling;
+    const icon = button.querySelector('i');
+    
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'fas fa-eye-slash';
+    } else {
+        input.type = 'password';
+        icon.className = 'fas fa-eye';
+    }
+}
+
+let strengthTimeout;
+function checkPasswordStrength(password) {
+    clearTimeout(strengthTimeout);
+    const strengthDiv = document.getElementById('passwordStrength');
+    
+    if (!password) {
+        strengthDiv.style.display = 'none';
+        return;
+    }
+    
+    strengthDiv.style.display = 'block';
+    
+    // Debounce API calls
+    strengthTimeout = setTimeout(() => {
+        fetch('/api/check_strength', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({password: password})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                updateStrengthDisplay(data.analysis);
+            }
+        })
+        .catch(error => {
+            console.error('Strength check error:', error);
+        });
+    }, 500);
+}
+
+function updateStrengthDisplay(analysis) {
+    const strengthDiv = document.getElementById('passwordStrength');
+    const fill = strengthDiv.querySelector('.strength-fill');
+    const text = strengthDiv.querySelector('.strength-text');
+    
+    const progress = analysis.progress || 0;
+    const level = analysis.strength_level || 'very_weak';
+    
+    fill.style.width = progress + '%';
+    fill.className = 'strength-fill strength-' + level;
+    text.textContent = analysis.strength_level.replace('_', ' ').toUpperCase() + 
+                     ' (' + analysis.strength_score + '/100)';
+    
+    // Update register button state
+    updateRegisterButton();
+}
+
+function checkPasswordMatch() {
+    const password = document.getElementById('registerPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    const matchDiv = document.getElementById('passwordMatch');
+    
+    if (!confirmPassword) {
+        matchDiv.style.display = 'none';
+        updateRegisterButton();
+        return;
+    }
+    
+    matchDiv.style.display = 'block';
+    
+    if (password === confirmPassword) {
+        matchDiv.innerHTML = '<i class="fas fa-check"></i> Passwords match';
+        matchDiv.className = 'password-match match';
+    } else {
+        matchDiv.innerHTML = '<i class="fas fa-times"></i> Passwords do not match';
+        matchDiv.className = 'password-match no-match';
+    }
+    
+    updateRegisterButton();
+}
+
+function updateRegisterButton() {
+    const password = document.getElementById('registerPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    const agreeTerms = document.getElementById('agreeTerms').checked;
+    const registerBtn = document.getElementById('registerBtn');
+    
+    const validPassword = password.length >= 8;
+    const passwordsMatch = password === confirmPassword && password.length > 0;
+    const allValid = validPassword && passwordsMatch && agreeTerms;
+    
+    registerBtn.disabled = !allValid;
+}
+
+// Listen for checkbox change
+document.getElementById('agreeTerms').addEventListener('change', updateRegisterButton);
+
+// Auto-focus username on page load
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('loginUsername').focus();
+});
+</script>
+{% endblock %}

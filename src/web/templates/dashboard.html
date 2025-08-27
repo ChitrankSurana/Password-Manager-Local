@@ -1,0 +1,411 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Personal Password Manager{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Dashboard Header -->
+    <div class="dashboard-header">
+        <div class="dashboard-title">
+            <h1>Welcome, {{ username }}!</h1>
+            <p>You have {{ password_count }} passwords stored securely</p>
+        </div>
+        
+        <div class="dashboard-actions">
+            <a href="{{ url_for('add_password') }}" class="btn-primary">
+                <i class="fas fa-plus"></i>
+                Add Password
+            </a>
+            <a href="{{ url_for('generate_password_page') }}" class="btn-secondary">
+                <i class="fas fa-dice"></i>
+                Generate
+            </a>
+        </div>
+    </div>
+    
+    <!-- Search and Filter -->
+    <div class="search-section">
+        <form class="search-form" method="GET" action="{{ url_for('search') }}">
+            <div class="search-input-group">
+                <i class="fas fa-search"></i>
+                <input 
+                    type="text" 
+                    name="q" 
+                    placeholder="Search passwords by website, username, or remarks..."
+                    value="{{ request.args.get('q', '') }}"
+                >
+                <button type="submit" class="btn-search">Search</button>
+            </div>
+        </form>
+        
+        <div class="filter-options">
+            <button class="filter-btn active" onclick="filterPasswords('all')">
+                <i class="fas fa-list"></i> All ({{ password_count }})
+            </button>
+            <button class="filter-btn" onclick="filterPasswords('recent')">
+                <i class="fas fa-clock"></i> Recent
+            </button>
+            <button class="filter-btn" onclick="filterPasswords('favorites')">
+                <i class="fas fa-star"></i> Favorites
+            </button>
+        </div>
+    </div>
+    
+    {% if passwords %}
+    <!-- Password List -->
+    <div class="password-list">
+        <div class="list-header">
+            <div class="sort-options">
+                <label for="sortBy">Sort by:</label>
+                <select id="sortBy" onchange="sortPasswords(this.value)">
+                    <option value="website">Website (A-Z)</option>
+                    <option value="website-desc">Website (Z-A)</option>
+                    <option value="date-new">Newest First</option>
+                    <option value="date-old">Oldest First</option>
+                    <option value="username">Username</option>
+                </select>
+            </div>
+            
+            <div class="view-options">
+                <button class="view-btn active" onclick="setView('list')" title="List View">
+                    <i class="fas fa-list"></i>
+                </button>
+                <button class="view-btn" onclick="setView('grid')" title="Grid View">
+                    <i class="fas fa-th"></i>
+                </button>
+            </div>
+        </div>
+        
+        <div id="passwordContainer" class="password-container list-view">
+            {% for password in passwords %}
+            <div class="password-item" data-website="{{ password.website.lower() }}" data-username="{{ password.username.lower() }}" data-date="{{ password.created_at }}">
+                <div class="password-item-header">
+                    <div class="password-icon">
+                        <i class="fas fa-globe"></i>
+                    </div>
+                    <div class="password-info">
+                        <h3 class="password-website">{{ password.website }}</h3>
+                        <p class="password-username">{{ password.username }}</p>
+                        {% if password.remarks %}
+                        <p class="password-remarks">{{ password.remarks[:100] }}{% if password.remarks|length > 100 %}...{% endif %}</p>
+                        {% endif %}
+                    </div>
+                    <div class="password-meta">
+                        <span class="password-date">{{ password.created_at.strftime('%Y-%m-%d') if password.created_at else 'Unknown' }}</span>
+                    </div>
+                </div>
+                
+                <div class="password-actions">
+                    <button class="action-btn" onclick="copyToClipboard('{{ password.username }}', 'Username copied!')" title="Copy Username">
+                        <i class="fas fa-user"></i>
+                    </button>
+                    <button class="action-btn" onclick="copyPassword({{ password.id }})" title="Copy Password">
+                        <i class="fas fa-key"></i>
+                    </button>
+                    <button class="action-btn" onclick="viewPassword({{ password.id }})" title="View Details">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <a href="{{ url_for('edit_password', password_id=password.id) }}" class="action-btn" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </a>
+                    <button class="action-btn delete-btn" onclick="confirmDelete({{ password.id }}, '{{ password.website }}')" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    {% else %}
+    <!-- Empty State -->
+    <div class="empty-state">
+        <div class="empty-icon">
+            <i class="fas fa-key"></i>
+        </div>
+        <h2>No passwords yet</h2>
+        <p>Get started by adding your first password. Your data is encrypted and stored securely on your device.</p>
+        <a href="{{ url_for('add_password') }}" class="btn-primary">
+            <i class="fas fa-plus"></i>
+            Add Your First Password
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Password Details Modal -->
+<div id="passwordModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modalTitle">Password Details</h2>
+            <button class="modal-close" onclick="closeModal('passwordModal')">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="password-details">
+                <div class="detail-group">
+                    <label>Website:</label>
+                    <span id="modalWebsite"></span>
+                </div>
+                <div class="detail-group">
+                    <label>Username:</label>
+                    <div class="copy-group">
+                        <span id="modalUsername"></span>
+                        <button class="copy-btn" onclick="copyModalField('modalUsername', 'Username copied!')">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="detail-group">
+                    <label>Password:</label>
+                    <div class="copy-group">
+                        <span id="modalPassword" class="password-hidden">••••••••••••</span>
+                        <button class="copy-btn" onclick="copyModalField('modalPassword', 'Password copied!')">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                        <button class="toggle-btn" onclick="toggleModalPassword()">
+                            <i class="fas fa-eye" id="modalToggleIcon"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="detail-group">
+                    <label>Remarks:</label>
+                    <span id="modalRemarks"></span>
+                </div>
+                <div class="detail-group">
+                    <label>Created:</label>
+                    <span id="modalCreated"></span>
+                </div>
+                <div class="detail-group">
+                    <label>Last Updated:</label>
+                    <span id="modalUpdated"></span>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a id="editPasswordBtn" href="#" class="btn-primary">
+                <i class="fas fa-edit"></i> Edit
+            </a>
+            <button class="btn-secondary" onclick="closeModal('passwordModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="deleteModal" class="modal">
+    <div class="modal-content modal-sm">
+        <div class="modal-header">
+            <h2>Confirm Deletion</h2>
+            <button class="modal-close" onclick="closeModal('deleteModal')">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="delete-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Are you sure you want to delete the password for <strong id="deleteWebsite"></strong>?</p>
+                <p class="warning-text">This action cannot be undone.</p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <form id="deleteForm" method="POST" style="display: inline;">
+                <button type="submit" class="btn-danger">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </form>
+            <button class="btn-secondary" onclick="closeModal('deleteModal')">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentPasswords = [];
+let currentPasswordData = null;
+
+// Initialize password data
+document.addEventListener('DOMContentLoaded', function() {
+    currentPasswords = Array.from(document.querySelectorAll('.password-item')).map(item => ({
+        element: item,
+        website: item.dataset.website,
+        username: item.dataset.username,
+        date: item.dataset.date
+    }));
+});
+
+function filterPasswords(filter) {
+    const items = document.querySelectorAll('.password-item');
+    const filterBtns = document.querySelectorAll('.filter-btn');
+    
+    // Update active filter button
+    filterBtns.forEach(btn => btn.classList.remove('active'));
+    document.querySelector(`[onclick="filterPasswords('${filter}')"]`).classList.add('active');
+    
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
+    items.forEach(item => {
+        let show = true;
+        
+        if (filter === 'recent') {
+            const itemDate = new Date(item.dataset.date);
+            show = itemDate >= oneWeekAgo;
+        } else if (filter === 'favorites') {
+            // For now, just show all since we don't have favorites implemented
+            show = false;
+        }
+        
+        item.style.display = show ? 'block' : 'none';
+    });
+}
+
+function sortPasswords(sortBy) {
+    const container = document.getElementById('passwordContainer');
+    const items = Array.from(container.querySelectorAll('.password-item'));
+    
+    items.sort((a, b) => {
+        switch(sortBy) {
+            case 'website':
+                return a.dataset.website.localeCompare(b.dataset.website);
+            case 'website-desc':
+                return b.dataset.website.localeCompare(a.dataset.website);
+            case 'username':
+                return a.dataset.username.localeCompare(b.dataset.username);
+            case 'date-new':
+                return new Date(b.dataset.date) - new Date(a.dataset.date);
+            case 'date-old':
+                return new Date(a.dataset.date) - new Date(b.dataset.date);
+            default:
+                return 0;
+        }
+    });
+    
+    // Re-append sorted items
+    items.forEach(item => container.appendChild(item));
+}
+
+function setView(view) {
+    const container = document.getElementById('passwordContainer');
+    const viewBtns = document.querySelectorAll('.view-btn');
+    
+    // Update active view button
+    viewBtns.forEach(btn => btn.classList.remove('active'));
+    document.querySelector(`[onclick="setView('${view}')"]`).classList.add('active');
+    
+    // Update container class
+    container.className = `password-container ${view}-view`;
+}
+
+function copyToClipboard(text, message = 'Copied to clipboard!') {
+    navigator.clipboard.writeText(text).then(() => {
+        showToast(message, 'success');
+    }).catch(err => {
+        showToast('Failed to copy to clipboard', 'error');
+        console.error('Copy failed:', err);
+    });
+}
+
+function copyPassword(passwordId) {
+    // In a real implementation, you'd fetch the password from the server
+    // For security, passwords shouldn't be stored in the client
+    fetch(`/api/get_password/${passwordId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                copyToClipboard(data.password, 'Password copied!');
+            } else {
+                showToast('Failed to copy password', 'error');
+            }
+        })
+        .catch(error => {
+            showToast('Error copying password', 'error');
+            console.error('Error:', error);
+        });
+}
+
+function viewPassword(passwordId) {
+    // Fetch password details from server
+    fetch(`/api/get_password/${passwordId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                currentPasswordData = data.password;
+                showPasswordModal(data.password);
+            } else {
+                showToast('Failed to load password details', 'error');
+            }
+        })
+        .catch(error => {
+            showToast('Error loading password details', 'error');
+            console.error('Error:', error);
+        });
+}
+
+function showPasswordModal(password) {
+    document.getElementById('modalTitle').textContent = `Password Details - ${password.website}`;
+    document.getElementById('modalWebsite').textContent = password.website;
+    document.getElementById('modalUsername').textContent = password.username;
+    document.getElementById('modalPassword').textContent = '••••••••••••';
+    document.getElementById('modalPassword').dataset.actualPassword = password.password;
+    document.getElementById('modalRemarks').textContent = password.remarks || 'No remarks';
+    document.getElementById('modalCreated').textContent = password.created_at ? new Date(password.created_at).toLocaleString() : 'Unknown';
+    document.getElementById('modalUpdated').textContent = password.updated_at ? new Date(password.updated_at).toLocaleString() : 'Unknown';
+    document.getElementById('editPasswordBtn').href = `/edit_password/${password.id}`;
+    
+    openModal('passwordModal');
+}
+
+function toggleModalPassword() {
+    const passwordSpan = document.getElementById('modalPassword');
+    const toggleIcon = document.getElementById('modalToggleIcon');
+    
+    if (passwordSpan.classList.contains('password-hidden')) {
+        passwordSpan.textContent = passwordSpan.dataset.actualPassword;
+        passwordSpan.classList.remove('password-hidden');
+        toggleIcon.className = 'fas fa-eye-slash';
+    } else {
+        passwordSpan.textContent = '••••••••••••';
+        passwordSpan.classList.add('password-hidden');
+        toggleIcon.className = 'fas fa-eye';
+    }
+}
+
+function copyModalField(fieldId, message) {
+    const field = document.getElementById(fieldId);
+    let textToCopy = field.textContent;
+    
+    // If it's the password field and it's hidden, use the actual password
+    if (fieldId === 'modalPassword' && field.classList.contains('password-hidden')) {
+        textToCopy = field.dataset.actualPassword;
+    }
+    
+    copyToClipboard(textToCopy, message);
+}
+
+function confirmDelete(passwordId, website) {
+    document.getElementById('deleteWebsite').textContent = website;
+    document.getElementById('deleteForm').action = `/delete_password/${passwordId}`;
+    openModal('deleteModal');
+}
+
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `
+        <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'times' : 'info'}"></i>
+        <span>${message}</span>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // Animate in
+    setTimeout(() => toast.classList.add('show'), 100);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+</script>
+{% endblock %}

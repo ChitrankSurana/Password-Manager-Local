@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Personal Password Manager - Secure password management">
+    <meta name="author" content="Personal Password Manager">
+    
+    <!-- Security Headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+    
+    <title>{% block title %}Personal Password Manager{% endblock %}</title>
+    
+    <!-- CSS -->
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- Navigation -->
+    {% if session.user_session %}
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <i class="fas fa-shield-alt"></i>
+                <span>Password Manager</span>
+            </div>
+            
+            <div class="nav-menu">
+                <a href="{{ url_for('dashboard') }}" class="nav-link">
+                    <i class="fas fa-home"></i> Dashboard
+                </a>
+                <a href="{{ url_for('add_password') }}" class="nav-link">
+                    <i class="fas fa-plus"></i> Add Password
+                </a>
+                <a href="{{ url_for('generate_password_page') }}" class="nav-link">
+                    <i class="fas fa-dice"></i> Generate
+                </a>
+                <a href="{{ url_for('backup_page') }}" class="nav-link">
+                    <i class="fas fa-download"></i> Backup
+                </a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link dropdown-toggle">
+                        <i class="fas fa-user"></i> {{ session.username }}
+                    </a>
+                    <div class="dropdown-menu">
+                        <a href="#" class="dropdown-item" onclick="toggleTheme()">
+                            <i class="fas fa-palette"></i> Toggle Theme
+                        </a>
+                        <div class="dropdown-divider"></div>
+                        <a href="{{ url_for('logout') }}" class="dropdown-item">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Mobile menu button -->
+            <button class="nav-toggle" onclick="toggleMobileMenu()">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+    </nav>
+    {% endif %}
+    
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-container">
+                {% for category, message in messages %}
+                    <div class="flash-message flash-{{ category }}">
+                        <div class="flash-content">
+                            <i class="fas fa-{{ 'check-circle' if category == 'success' else 'exclamation-triangle' if category == 'warning' else 'times-circle' if category == 'error' else 'info-circle' }}"></i>
+                            <span>{{ message }}</span>
+                        </div>
+                        <button class="flash-close" onclick="this.parentElement.remove()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+    
+    <!-- Main Content -->
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+    
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <p>&copy; 2024 Personal Password Manager. Secure password management for everyone.</p>
+            <div class="footer-links">
+                <span>Version 1.0.0</span>
+                <span>•</span>
+                <a href="#" onclick="showSecurityInfo()">Security Info</a>
+                <span>•</span>
+                <a href="#" onclick="showAbout()">About</a>
+            </div>
+        </div>
+    </footer>
+    
+    <!-- Security Info Modal -->
+    <div id="securityModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-shield-alt"></i> Security Information</h2>
+                <button class="modal-close" onclick="closeModal('securityModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="security-info">
+                    <div class="security-item">
+                        <i class="fas fa-lock"></i>
+                        <div>
+                            <h3>AES-256 Encryption</h3>
+                            <p>All passwords are encrypted using military-grade AES-256-CBC encryption</p>
+                        </div>
+                    </div>
+                    <div class="security-item">
+                        <i class="fas fa-key"></i>
+                        <div>
+                            <h3>PBKDF2 Key Derivation</h3>
+                            <p>Master passwords use PBKDF2-HMAC-SHA256 with 100,000+ iterations</p>
+                        </div>
+                    </div>
+                    <div class="security-item">
+                        <i class="fas fa-database"></i>
+                        <div>
+                            <h3>Local Storage</h3>
+                            <p>All data remains on your computer - no cloud dependencies</p>
+                        </div>
+                    </div>
+                    <div class="security-item">
+                        <i class="fas fa-user-shield"></i>
+                        <div>
+                            <h3>Zero Knowledge</h3>
+                            <p>Your master password is never stored anywhere</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- About Modal -->
+    <div id="aboutModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-info-circle"></i> About Password Manager</h2>
+                <button class="modal-close" onclick="closeModal('aboutModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="about-info">
+                    <p><strong>Personal Password Manager v1.0.0</strong></p>
+                    <p>A secure, local password management solution designed for privacy and security.</p>
+                    <br>
+                    <h3>Features:</h3>
+                    <ul>
+                        <li>Military-grade encryption (AES-256)</li>
+                        <li>Advanced password generation</li>
+                        <li>Real-time strength analysis</li>
+                        <li>Comprehensive backup system</li>
+                        <li>Browser import support</li>
+                        <li>Modern responsive interface</li>
+                    </ul>
+                    <br>
+                    <p><strong>Remember:</strong> Your master password is the key to all your data. Keep it secure!</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading...</p>
+        </div>
+    </div>
+    
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% block extra_js %}{% endblock %}
+    
+    <!-- Auto-hide flash messages -->
+    <script>
+        setTimeout(() => {
+            const flashMessages = document.querySelectorAll('.flash-message');
+            flashMessages.forEach(msg => {
+                if (!msg.classList.contains('flash-error')) {
+                    msg.style.opacity = '0';
+                    setTimeout(() => msg.remove(), 300);
+                }
+            });
+        }, 5000);
+    </script>
+</body>
+</html>

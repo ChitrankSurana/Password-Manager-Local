@@ -1,0 +1,12 @@
+{% extends "login.html" %}
+
+{% block content %}
+<script>
+// Auto-switch to register tab if we're on the register page
+document.addEventListener('DOMContentLoaded', function() {
+    switchTab('register');
+    document.getElementById('registerUsername').focus();
+});
+</script>
+{{ super() }}
+{% endblock %}
