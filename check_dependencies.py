@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Dependency Checker for Personal Password Manager
 ===============================================
@@ -7,7 +8,7 @@ This script verifies that all required software dependencies are installed
 on the system before running the password manager application.
 
 It checks for:
-1. Python version compatibility (3.9+)
+1. Python version compatibility (3.8+)
 2. Required Python packages from requirements.txt
 3. System-level dependencies
 4. Database file permissions
@@ -24,21 +25,57 @@ import platform
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
+# Enable Windows console color support
+if platform.system() == "Windows":
+    try:
+        # Enable ANSI color codes on Windows 10+
+        os.system('color')
+        # Alternative method for older Windows versions
+        import colorama
+        colorama.init()
+    except ImportError:
+        # colorama not available, colors will be disabled
+        pass
+
 # Color codes for terminal output
 class Colors:
     """ANSI color codes for terminal output formatting"""
-    GREEN = '\033[92m'    # Success messages
-    RED = '\033[91m'      # Error messages
-    YELLOW = '\033[93m'   # Warning messages
-    BLUE = '\033[94m'     # Info messages
-    PURPLE = '\033[95m'   # Header messages
-    CYAN = '\033[96m'     # Subheader messages
-    END = '\033[0m'       # Reset color
-    BOLD = '\033[1m'      # Bold text
+    if platform.system() == "Windows":
+        # Use simpler colors for Windows compatibility
+        GREEN = ''     # Success messages
+        RED = ''       # Error messages  
+        YELLOW = ''    # Warning messages
+        BLUE = ''      # Info messages
+        PURPLE = ''    # Header messages
+        CYAN = ''      # Subheader messages
+        END = ''       # Reset color
+        BOLD = ''      # Bold text
+    else:
+        GREEN = '\033[92m'    # Success messages
+        RED = '\033[91m'      # Error messages
+        YELLOW = '\033[93m'   # Warning messages
+        BLUE = '\033[94m'     # Info messages
+        PURPLE = '\033[95m'   # Header messages
+        CYAN = '\033[96m'     # Subheader messages
+        END = '\033[0m'       # Reset color
+        BOLD = '\033[1m'      # Bold text
 
 def print_colored(message: str, color: str = Colors.END) -> None:
     """Print a message with color formatting"""
-    print(f"{color}{message}{Colors.END}")
+    if platform.system() == "Windows":
+        # On Windows, add prefix instead of color codes
+        if color == Colors.GREEN:
+            print(f"[OK] {message}")
+        elif color == Colors.RED:
+            print(f"[ERROR] {message}")
+        elif color == Colors.YELLOW:
+            print(f"[WARNING] {message}")
+        elif color == Colors.BLUE:
+            print(f"[INFO] {message}")
+        else:
+            print(message)
+    else:
+        print(f"{color}{message}{Colors.END}")
 
 def print_header(message: str) -> None:
     """Print a formatted header message"""
@@ -53,7 +90,7 @@ def print_subheader(message: str) -> None:
 
 def check_python_version() -> bool:
     """
-    Check if Python version is 3.9 or higher
+    Check if Python version is 3.8 or higher
     
     Returns:
         bool: True if version is compatible, False otherwise
@@ -61,7 +98,7 @@ def check_python_version() -> bool:
     print_subheader("Checking Python Version")
     
     current_version = sys.version_info
-    required_version = (3, 9)
+    required_version = (3, 8)
     
     version_string = f"{current_version.major}.{current_version.minor}.{current_version.micro}"
     print(f"Current Python version: {version_string}")
@@ -127,14 +164,19 @@ def get_required_packages() -> Dict[str, str]:
                 if '>=' in line:
                     package_name = line.split('>=')[0].strip()
                     version_req = line.split('>=')[1].strip()
+                    # Remove comments from version requirement
+                    version_req = version_req.split('#')[0].strip()
                     required_packages[package_name] = version_req
                 elif '==' in line:
                     package_name = line.split('==')[0].strip()
                     version_req = line.split('==')[1].strip()
+                    # Remove comments from version requirement
+                    version_req = version_req.split('#')[0].strip()
                     required_packages[package_name] = version_req
                 else:
                     # No version specified
-                    required_packages[line.strip()] = "any"
+                    package_name = line.strip().split('#')[0].strip()
+                    required_packages[package_name] = "any"
     
     except Exception as e:
         print_colored(f"Error reading requirements.txt: {e}", Colors.RED)
@@ -161,6 +203,14 @@ def check_package_installation(package_name: str, required_version: str = "any")
             import_name = "dateutil"
         elif package_name == "google-api-python-client":
             import_name = "googleapiclient"
+        elif package_name == "flask-session":
+            import_name = "flask_session"
+        elif package_name == "flask-wtf":
+            import_name = "flask_wtf"
+        elif package_name == "pytest-mock":
+            import_name = "pytest_mock"
+        elif package_name == "pytest-cov":
+            import_name = "pytest_cov"
         
         # Try to import the package
         module = importlib.import_module(import_name)
@@ -295,7 +345,7 @@ def check_system_requirements() -> bool:
             print_colored("[OK] Sufficient disk space available", Colors.GREEN)
             space_ok = True
         else:
-            print_colored("⚠ Low disk space - may cause issues with database and backups", Colors.YELLOW)
+            print_colored("[WARNING] Low disk space - may cause issues with database and backups", Colors.YELLOW)
             space_ok = True  # Don't fail, just warn
     except Exception as e:
         print_colored(f"? Could not check disk space: {e}", Colors.YELLOW)

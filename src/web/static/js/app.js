@@ -316,36 +316,86 @@ function initializeTooltips() {
  */
 function setupKeyboardShortcuts() {
     document.addEventListener('keydown', function(e) {
-        // Ctrl/Cmd + K - Focus search
-        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-            e.preventDefault();
-            const searchInput = document.querySelector('.search-input-group input');
-            if (searchInput) {
-                searchInput.focus();
+        // Skip if user is typing in an input field
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            // Only handle Escape in input fields
+            if (e.key === 'Escape') {
+                e.target.blur();
+                return;
+            }
+            return;
+        }
+        
+        // Navigation shortcuts with Alt key
+        if (e.altKey && !e.ctrlKey && !e.metaKey) {
+            switch (e.key.toLowerCase()) {
+                case 'd':
+                    e.preventDefault();
+                    if (window.location.pathname !== '/dashboard') {
+                        window.location.href = '/dashboard';
+                    }
+                    break;
+                case 'a':
+                    e.preventDefault();
+                    window.location.href = '/add_password';
+                    break;
+                case 'g':
+                    e.preventDefault();
+                    window.location.href = '/generate_password';
+                    break;
+                case 'b':
+                    e.preventDefault();
+                    window.location.href = '/backup';
+                    break;
+                case 'l':
+                    e.preventDefault();
+                    if (confirm('Are you sure you want to logout?')) {
+                        window.location.href = '/logout';
+                    }
+                    break;
+                case 't':
+                    e.preventDefault();
+                    toggleTheme();
+                    break;
             }
         }
         
-        // Ctrl/Cmd + N - Add new password (if on dashboard)
-        if ((e.ctrlKey || e.metaKey) && e.key === 'n' && window.location.pathname === '/dashboard') {
+        // Search shortcut
+        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
             e.preventDefault();
-            window.location.href = '/add_password';
+            const searchInput = document.querySelector('.search-input-group input, input[name="q"]');
+            if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+            }
         }
         
-        // Ctrl/Cmd + G - Generate password
-        if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+        // Help shortcuts
+        if (e.key === 'F1' || e.key === '?') {
             e.preventDefault();
-            window.location.href = '/generate_password';
+            showKeyboardShortcuts();
         }
         
         // ESC - Close modals or clear search
         if (e.key === 'Escape') {
-            const searchInput = document.querySelector('.search-input-group input');
+            const openModal = document.querySelector('.modal.show');
+            if (openModal) {
+                closeModal(openModal.id);
+                return;
+            }
+            
+            const searchInput = document.querySelector('.search-input-group input, input[name="q"]');
             if (searchInput && searchInput.value) {
                 searchInput.value = '';
                 searchInput.dispatchEvent(new Event('input'));
+                searchInput.blur();
             }
         }
     });
+}
+
+function showKeyboardShortcuts() {
+    openModal('shortcutsModal');
 }
 
 /**
@@ -593,6 +643,7 @@ window.openModal = openModal;
 window.closeModal = closeModal;
 window.showSecurityInfo = showSecurityInfo;
 window.showAbout = showAbout;
+window.showKeyboardShortcuts = showKeyboardShortcuts;
 window.toggleMobileMenu = toggleMobileMenu;
 window.showToast = showToast;
 window.copyToClipboard = copyToClipboard;

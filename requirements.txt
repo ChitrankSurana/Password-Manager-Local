@@ -20,8 +20,11 @@ python-dateutil>=2.8.0        # Date parsing and manipulation for backup timesta
 # Web Interface
 flask>=2.3.0                  # Lightweight web framework for web interface
 flask-session>=0.5.0          # Session management for web interface security
+flask-wtf>=1.1.0              # CSRF protection and form validation
+wtforms>=3.0.0                # Form validation and rendering
 jinja2>=3.1.0                 # Template engine for HTML generation
 werkzeug>=2.3.0               # WSGI utilities and development server
+itsdangerous>=2.1.0           # Cryptographic signing for session cookies
 
 # Cloud Sync (Optional Features)
 requests>=2.31.0              # HTTP library for cloud storage API interactions
@@ -42,3 +45,13 @@ lxml>=4.9.0                   # XML processing for various password manager form
 # System Integration
 psutil>=5.9.0                 # System information for dependency checking
 packaging>=23.1               # Version parsing for dependency verification
+colorama>=0.4.0               # Cross-platform colored terminal text (Windows compatibility)
+chardet>=5.0.0                # Character encoding detection for CSV import
+
+# Testing and Development
+pytest>=7.4.0                 # Testing framework (alternative to unittest)
+coverage>=7.3.0               # Code coverage measurement
+pytest-cov>=4.1.0            # Coverage plugin for pytest
+pytest-mock>=3.11.0          # Mocking plugin for pytest
+selenium>=4.15.0              # Web browser automation for end-to-end tests (optional)
+mock>=5.1.0                   # Mock object library for testing

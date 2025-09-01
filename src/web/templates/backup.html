@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+
+{% block title %}Backup & Export - Personal Password Manager{% endblock %}
+
+{% block extra_css %}
+<style>
+.backup-card {
+    background-color: var(--bg-surface);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 2px 8px var(--shadow-light);
+    padding: var(--spacing-xl);
+    margin-bottom: var(--spacing-xl);
+}
+
+.backup-section {
+    margin-bottom: var(--spacing-xxl);
+}
+
+.backup-section:last-child {
+    margin-bottom: 0;
+}
+
+.backup-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: var(--spacing-lg);
+    margin: var(--spacing-lg) 0;
+}
+
+.backup-option {
+    background-color: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-lg);
+    text-align: center;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+}
+
+.backup-option:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px var(--shadow-medium);
+}
+
+.backup-option i {
+    display: block;
+    font-size: 2.5rem;
+    color: var(--primary);
+    margin-bottom: var(--spacing-md);
+}
+
+.backup-list {
+    background-color: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.backup-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid var(--border-color);
+    transition: background-color var(--transition-fast);
+}
+
+.backup-item:last-child {
+    border-bottom: none;
+}
+
+.backup-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.backup-info h4 {
+    margin-bottom: var(--spacing-xs);
+    color: var(--text-primary);
+}
+
+.backup-meta {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+}
+
+.backup-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.export-form {
+    background-color: var(--bg-secondary);
+    padding: var(--spacing-lg);
+    border-radius: var(--radius-md);
+    margin-top: var(--spacing-lg);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <div class="dashboard-title">
+            <h1><i class="fas fa-download"></i> Backup & Export</h1>
+            <p>Create backups and export your password data securely</p>
+        </div>
+        <div class="dashboard-actions">
+            <a href="{{ url_for('dashboard') }}" class="btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+    
+    <!-- Database Backup Section -->
+    <div class="backup-section">
+        <div class="backup-card">
+            <h2><i class="fas fa-database"></i> Database Backup</h2>
+            <p>Create a complete backup of your password database with all metadata and settings.</p>
+            
+            <div class="backup-options">
+                <div class="backup-option" onclick="createDatabaseBackup()">
+                    <i class="fas fa-hdd"></i>
+                    <h3>Full Database Backup</h3>
+                    <p>Complete database copy with compression and timestamps</p>
+                    <button class="btn-primary" style="margin-top: 1rem;">
+                        <i class="fas fa-download"></i> Create Backup
+                    </button>
+                </div>
+                
+                <div class="backup-option" onclick="scheduleBackup()">
+                    <i class="fas fa-clock"></i>
+                    <h3>Scheduled Backup</h3>
+                    <p>Set up automatic daily or weekly backups</p>
+                    <button class="btn-info" style="margin-top: 1rem;">
+                        <i class="fas fa-calendar"></i> Schedule
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Export Section -->
+    <div class="backup-section">
+        <div class="backup-card">
+            <h2><i class="fas fa-file-export"></i> Export Data</h2>
+            <p>Export your passwords in various formats with encryption protection.</p>
+            
+            <div class="export-form">
+                <form id="exportForm">
+                    <div class="form-group">
+                        <label><i class="fas fa-file-alt"></i> Export Format</label>
+                        <select id="exportFormat" required>
+                            <option value="json">JSON (Recommended)</option>
+                            <option value="csv">CSV (Spreadsheet)</option>
+                            <option value="xml">XML (Structured)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label><i class="fas fa-key"></i> Master Password</label>
+                        <div class="password-input-group">
+                            <input type="password" id="exportPassword" required 
+                                   placeholder="Enter your master password for encryption">
+                            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('exportPassword')">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                        <small class="form-help">Required to encrypt the exported data</small>
+                    </div>
+                    
+                    <div class="dashboard-actions">
+                        <button type="submit" class="btn-success">
+                            <i class="fas fa-file-export"></i> Export Data
+                        </button>
+                        <button type="button" onclick="clearExportForm()" class="btn-secondary">
+                            <i class="fas fa-times"></i> Clear
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Recent Backups Section -->
+    <div class="backup-section">
+        <div class="backup-card">
+            <h2><i class="fas fa-history"></i> Recent Backups</h2>
+            <p>Manage your existing backups and restore data when needed.</p>
+            
+            <div id="backupsList" class="backup-list">
+                {% if backups %}
+                    {% for backup in backups %}
+                    <div class="backup-item">
+                        <div class="backup-info">
+                            <h4>{{ backup.name }}</h4>
+                            <div class="backup-meta">
+                                <span><i class="fas fa-calendar"></i> {{ backup.date }}</span>
+                                <span style="margin-left: 1rem;"><i class="fas fa-file"></i> {{ backup.size }}</span>
+                                <span style="margin-left: 1rem;"><i class="fas fa-shield-alt"></i> {{ backup.type }}</span>
+                            </div>
+                        </div>
+                        <div class="backup-actions">
+                            <button class="action-btn" onclick="downloadBackup('{{ backup.path }}')" title="Download">
+                                <i class="fas fa-download"></i>
+                            </button>
+                            <button class="action-btn" onclick="restoreBackup('{{ backup.path }}')" title="Restore">
+                                <i class="fas fa-undo"></i>
+                            </button>
+                            <button class="action-btn delete-btn" onclick="deleteBackup('{{ backup.path }}')" title="Delete">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state" style="padding: 2rem;">
+                        <i class="fas fa-folder-open" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                        <h3>No Backups Yet</h3>
+                        <p>Create your first backup to get started with data protection.</p>
+                        <button onclick="createDatabaseBackup()" class="btn-primary" style="margin-top: 1rem;">
+                            <i class="fas fa-plus"></i> Create First Backup
+                        </button>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Import Section -->
+    <div class="backup-section">
+        <div class="backup-card">
+            <h2><i class="fas fa-file-import"></i> Import Data</h2>
+            <p>Import passwords from other password managers or restore from backups.</p>
+            
+            <div class="backup-options">
+                <div class="backup-option" onclick="showImportDialog('browser')">
+                    <i class="fab fa-chrome"></i>
+                    <h3>Browser Import</h3>
+                    <p>Import from Chrome, Firefox, or Edge</p>
+                </div>
+                
+                <div class="backup-option" onclick="showImportDialog('file')">
+                    <i class="fas fa-file-csv"></i>
+                    <h3>File Import</h3>
+                    <p>Import from CSV, JSON, or other formats</p>
+                </div>
+                
+                <div class="backup-option" onclick="showImportDialog('restore')">
+                    <i class="fas fa-database"></i>
+                    <h3>Restore Backup</h3>
+                    <p>Restore from a previous database backup</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function createDatabaseBackup() {
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    loadingOverlay.style.display = 'flex';
+    
+    try {
+        const response = await fetch('/api/create_backup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('Database backup created successfully!', 'success');
+            location.reload(); // Refresh to show new backup
+        } else {
+            showToast('Error creating backup: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('Error creating backup: ' + error.message, 'error');
+    } finally {
+        loadingOverlay.style.display = 'none';
+    }
+}
+
+async function exportData() {
+    const form = document.getElementById('exportForm');
+    const formData = new FormData(form);
+    
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    loadingOverlay.style.display = 'flex';
+    
+    try {
+        const response = await fetch('/api/export_data', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                format: document.getElementById('exportFormat').value,
+                master_password: document.getElementById('exportPassword').value
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('Data exported successfully!', 'success');
+            if (result.download_url) {
+                window.location.href = result.download_url;
+            }
+            clearExportForm();
+        } else {
+            showToast('Error exporting data: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('Error exporting data: ' + error.message, 'error');
+    } finally {
+        loadingOverlay.style.display = 'none';
+    }
+}
+
+function clearExportForm() {
+    document.getElementById('exportForm').reset();
+}
+
+function scheduleBackup() {
+    showToast('Scheduled backup feature coming soon!', 'info');
+}
+
+function downloadBackup(path) {
+    window.location.href = '/download/' + encodeURIComponent(path);
+}
+
+function restoreBackup(path) {
+    if (confirm('Are you sure you want to restore this backup? This will replace your current data.')) {
+        showToast('Restore functionality coming soon!', 'info');
+    }
+}
+
+function deleteBackup(path) {
+    if (confirm('Are you sure you want to delete this backup? This action cannot be undone.')) {
+        showToast('Delete backup functionality coming soon!', 'info');
+    }
+}
+
+function showImportDialog(type) {
+    showToast(`${type} import functionality coming soon!`, 'info');
+}
+
+function togglePasswordVisibility(fieldId) {
+    const field = document.getElementById(fieldId);
+    const toggle = field.nextElementSibling.querySelector('i');
+    
+    if (field.type === 'password') {
+        field.type = 'text';
+        toggle.className = 'fas fa-eye-slash';
+    } else {
+        field.type = 'password';
+        toggle.className = 'fas fa-eye';
+    }
+}
+
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type} show`;
+    toast.innerHTML = `
+        <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'times' : 'info'}"></i>
+        ${message}
+    `;
+    
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('exportForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        exportData();
+    });
+});
+</script>
+{% endblock %}

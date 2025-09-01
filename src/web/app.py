@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Personal Password Manager - Web Application
 ==========================================
@@ -34,8 +35,10 @@ from typing import Optional, Dict, Any
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask import send_file, abort
+from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
+from itsdangerous import URLSafeTimedSerializer
 
 # Import core functionality
 import sys
@@ -87,6 +90,13 @@ class WebPasswordManager:
         self.app.config['SESSION_COOKIE_HTTPONLY'] = True
         self.app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
         self.app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
+        
+        # CSRF Protection
+        self.app.config['WTF_CSRF_ENABLED'] = True
+        self.app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour
+        
+        # Initialize CSRF protection
+        self.csrf = CSRFProtect(self.app)
         
         # Upload settings
         self.app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -500,6 +510,45 @@ class WebPasswordManager:
             except Exception as e:
                 logger.error(f"Download error: {e}")
                 abort(500)
+        
+        # Password Health Analysis
+        @self.app.route('/api/password_health', methods=['GET'])
+        @self.require_auth
+        def api_password_health():
+            """API endpoint for password health analysis"""
+            try:
+                user_session = session['user_session']
+                passwords = self.password_manager.get_all_passwords(user_session)
+                
+                health_analysis = self._analyze_password_health(passwords)
+                
+                return jsonify({
+                    'success': True,
+                    'health_analysis': health_analysis
+                })
+                
+            except Exception as e:
+                logger.error(f"Password health analysis error: {e}")
+                return jsonify({'success': False, 'error': str(e)}), 500
+        
+        @self.app.route('/password_health')
+        @self.require_auth
+        def password_health_page():
+            """Password health analysis page"""
+            try:
+                user_session = session['user_session']
+                passwords = self.password_manager.get_all_passwords(user_session)
+                health_analysis = self._analyze_password_health(passwords)
+                
+                return render_template('password_health.html',
+                                     username=session.get('username'),
+                                     health_analysis=health_analysis,
+                                     password_count=len(passwords))
+                                     
+            except Exception as e:
+                logger.error(f"Password health page error: {e}")
+                flash('Error loading password health analysis.', 'error')
+                return redirect(url_for('dashboard'))
     
     def require_auth(self, f):
         """Decorator to require authentication for routes"""
@@ -542,6 +591,222 @@ class WebPasswordManager:
             flash('File is too large. Maximum size is 16MB.', 'error')
             return redirect(request.url), 413
     
+    def _analyze_password_health(self, passwords):
+        """Analyze password health and return detailed report"""
+        import hashlib
+        from datetime import datetime, timedelta
+        from collections import Counter
+        
+        analysis = {
+            'total_passwords': len(passwords),
+            'weak_passwords': [],
+            'duplicate_passwords': [],
+            'old_passwords': [],
+            'reused_passwords': [],
+            'security_score': 0,
+            'recommendations': [],
+            'statistics': {
+                'very_weak': 0,
+                'weak': 0,
+                'fair': 0,
+                'good': 0,
+                'strong': 0,
+                'very_strong': 0
+            }
+        }
+        
+        if not passwords:
+            return analysis
+        
+        # Calculate date thresholds
+        now = datetime.now()
+        six_months_ago = now - timedelta(days=180)
+        one_year_ago = now - timedelta(days=365)
+        
+        # Track password hashes to detect duplicates
+        password_hashes = {}
+        website_passwords = {}
+        
+        for password in passwords:
+            # Basic strength analysis (simplified)
+            strength = self._analyze_password_strength(password.password)
+            analysis['statistics'][strength] += 1
+            
+            # Check for weak passwords
+            if strength in ['very_weak', 'weak']:
+                analysis['weak_passwords'].append({
+                    'id': password.id,
+                    'website': password.website,
+                    'strength': strength,
+                    'issues': self._get_password_issues(password.password)
+                })
+            
+            # Check for old passwords
+            if password.created_at:
+                if password.created_at < one_year_ago:
+                    age = 'very_old'
+                elif password.created_at < six_months_ago:
+                    age = 'old'
+                else:
+                    age = 'recent'
+                    
+                if age in ['old', 'very_old']:
+                    analysis['old_passwords'].append({
+                        'id': password.id,
+                        'website': password.website,
+                        'age': age,
+                        'created_at': password.created_at.strftime('%Y-%m-%d'),
+                        'days_old': (now - password.created_at).days
+                    })
+            
+            # Check for duplicate passwords
+            password_hash = hashlib.sha256(password.password.encode()).hexdigest()
+            if password_hash in password_hashes:
+                # Found duplicate
+                existing = password_hashes[password_hash]
+                analysis['duplicate_passwords'].append({
+                    'id': password.id,
+                    'website': password.website,
+                    'duplicate_of': existing['website'],
+                    'duplicate_id': existing['id']
+                })
+            else:
+                password_hashes[password_hash] = {
+                    'id': password.id,
+                    'website': password.website
+                }
+            
+            # Track passwords by website for reuse detection
+            if password.website not in website_passwords:
+                website_passwords[password.website] = []
+            website_passwords[password.website].append(password)
+        
+        # Calculate security score
+        total = len(passwords)
+        strong_count = analysis['statistics']['good'] + analysis['statistics']['strong'] + analysis['statistics']['very_strong']
+        weak_count = len(analysis['weak_passwords'])
+        old_count = len(analysis['old_passwords'])
+        duplicate_count = len(analysis['duplicate_passwords'])
+        
+        # Base score
+        security_score = 100
+        
+        # Deduct points for issues
+        if total > 0:
+            security_score -= (weak_count / total) * 40
+            security_score -= (old_count / total) * 30
+            security_score -= (duplicate_count / total) * 20
+            
+            # Bonus for having many strong passwords
+            if strong_count / total > 0.8:
+                security_score += 10
+        
+        analysis['security_score'] = max(0, min(100, int(security_score)))
+        
+        # Generate recommendations
+        if weak_count > 0:
+            analysis['recommendations'].append({
+                'type': 'weak_passwords',
+                'priority': 'high',
+                'title': f'Update {weak_count} weak passwords',
+                'description': 'Replace weak passwords with strong, randomly generated ones.',
+                'action': 'update_weak'
+            })
+        
+        if duplicate_count > 0:
+            analysis['recommendations'].append({
+                'type': 'duplicates',
+                'priority': 'high',
+                'title': f'Fix {duplicate_count} duplicate passwords',
+                'description': 'Use unique passwords for each account to improve security.',
+                'action': 'fix_duplicates'
+            })
+        
+        if old_count > 0:
+            analysis['recommendations'].append({
+                'type': 'old_passwords',
+                'priority': 'medium',
+                'title': f'Update {old_count} old passwords',
+                'description': 'Regularly updating passwords reduces security risks.',
+                'action': 'update_old'
+            })
+        
+        if total < 5:
+            analysis['recommendations'].append({
+                'type': 'few_passwords',
+                'priority': 'low',
+                'title': 'Add more passwords',
+                'description': 'Store more passwords to fully secure your digital life.',
+                'action': 'add_more'
+            })
+        
+        return analysis
+    
+    def _analyze_password_strength(self, password):
+        """Simplified password strength analysis"""
+        score = 0
+        length = len(password)
+        
+        # Length scoring
+        if length >= 12:
+            score += 25
+        elif length >= 8:
+            score += 15
+        elif length >= 6:
+            score += 5
+        
+        # Character variety scoring
+        if any(c.islower() for c in password):
+            score += 10
+        if any(c.isupper() for c in password):
+            score += 10
+        if any(c.isdigit() for c in password):
+            score += 10
+        if any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?' for c in password):
+            score += 15
+        
+        # Entropy and pattern penalties
+        if password.lower() in ['password', '123456', 'qwerty', 'abc123']:
+            score -= 30
+        
+        # Convert score to strength level
+        if score >= 60:
+            return 'very_strong'
+        elif score >= 50:
+            return 'strong'
+        elif score >= 40:
+            return 'good'
+        elif score >= 30:
+            return 'fair'
+        elif score >= 20:
+            return 'weak'
+        else:
+            return 'very_weak'
+    
+    def _get_password_issues(self, password):
+        """Get specific issues with a password"""
+        issues = []
+        
+        if len(password) < 8:
+            issues.append('Too short (less than 8 characters)')
+        
+        if not any(c.islower() for c in password):
+            issues.append('No lowercase letters')
+        
+        if not any(c.isupper() for c in password):
+            issues.append('No uppercase letters')
+        
+        if not any(c.isdigit() for c in password):
+            issues.append('No numbers')
+        
+        if not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?' for c in password):
+            issues.append('No special characters')
+        
+        if password.lower() in ['password', '123456', 'qwerty', 'abc123', 'password123']:
+            issues.append('Common password')
+        
+        return issues
+
     def run(self, host='127.0.0.1', port=5000, debug=False):
         """Run the web application"""
         logger.info(f"Starting Password Manager Web Interface on {host}:{port}")

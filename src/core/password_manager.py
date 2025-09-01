@@ -140,7 +140,8 @@ class PasswordManagerCore:
     
     def __init__(self, db_path: str = "data/password_manager.db",
                  cache_mode: PasswordCacheMode = PasswordCacheMode.TEMPORARY,
-                 cache_timeout_minutes: int = 5):
+                 cache_timeout_minutes: int = 5,
+                 auth_manager: AuthenticationManager = None):
         """
         Initialize the password manager core system
         
@@ -148,8 +149,12 @@ class PasswordManagerCore:
             db_path (str): Path to the database file
             cache_mode (PasswordCacheMode): Master password caching strategy
             cache_timeout_minutes (int): Cache timeout for temporary mode
+            auth_manager (AuthenticationManager): Existing auth manager to reuse
         """
-        self.auth_manager = AuthenticationManager(db_path)
+        if auth_manager is not None:
+            self.auth_manager = auth_manager
+        else:
+            self.auth_manager = AuthenticationManager(db_path)
         self.cache_mode = cache_mode
         self.cache_timeout_minutes = cache_timeout_minutes
         

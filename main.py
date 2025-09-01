@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Personal Password Manager - Main Entry Point
 ============================================
@@ -131,15 +132,68 @@ def launch_gui():
     
     try:
         # Import GUI modules
-        from gui.main_window import PasswordManagerGUI
-        from gui.themes import setup_theme
+        import customtkinter as ctk
+        from src.gui.login_window import LoginWindow
+        from src.gui.main_window import MainWindow
+        from src.gui.themes import setup_theme
+        from src.core.auth import AuthenticationManager
+        from src.core.password_manager import PasswordManagerCore
         
         # Initialize theme system
         setup_theme()
         
-        # Create and run GUI application
-        app = PasswordManagerGUI()
-        app.run()
+        # Create a hidden root window for proper Tkinter application structure
+        root = ctk.CTk()
+        root.withdraw()
+        
+        # Initialize managers
+        auth_manager = AuthenticationManager()
+        password_manager = PasswordManagerCore(auth_manager=auth_manager)
+        
+        main_window_ref = [None]  # Use list to allow modification in nested function
+        
+        def on_login_success(session_id: str, username: str):
+            """Callback when login is successful"""
+            # Close the login window
+            try:
+                login_window.destroy()
+            except:
+                pass
+            
+            # Create main window
+            main_window = MainWindow(
+                session_id=session_id,
+                username=username,
+                password_manager=password_manager,
+                auth_manager=auth_manager,
+                parent=root
+            )
+            main_window_ref[0] = main_window
+            
+            # When main window closes, logout and quit the application
+            def on_main_window_close():
+                try:
+                    auth_manager.logout_user(session_id)
+                except:
+                    pass
+                try:
+                    main_window.destroy()
+                except:
+                    pass
+                root.quit()
+            
+            main_window.protocol("WM_DELETE_WINDOW", on_main_window_close)
+        
+        def on_login_window_close():
+            """Handle login window close"""
+            root.quit()
+        
+        # Create login window
+        login_window = LoginWindow(auth_manager, on_login_success, parent=root)
+        login_window.protocol("WM_DELETE_WINDOW", on_login_window_close)
+        
+        # Start the application
+        root.mainloop()
         
     except ImportError as e:
         print(f"[ERROR] GUI dependencies not found: {e}")
@@ -162,7 +216,7 @@ def launch_web():
     
     try:
         # Import web modules
-        from web.app import create_app
+        from src.web.app import create_app
         
         # Create Flask application
         app = create_app()

@@ -23,6 +23,50 @@
         </div>
     </div>
     
+    <!-- Quick Stats -->
+    {% if passwords %}
+    <div class="stats-section">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-key"></i>
+                </div>
+                <div class="stat-info">
+                    <div class="stat-number">{{ password_count }}</div>
+                    <div class="stat-label">Total Passwords</div>
+                </div>
+            </div>
+            <div class="stat-card" id="recentStat">
+                <div class="stat-icon">
+                    <i class="fas fa-clock"></i>
+                </div>
+                <div class="stat-info">
+                    <div class="stat-number" id="recentCount">0</div>
+                    <div class="stat-label">Added This Week</div>
+                </div>
+            </div>
+            <div class="stat-card" id="securityStat">
+                <div class="stat-icon">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <div class="stat-info">
+                    <div class="stat-number" id="securityScore">--</div>
+                    <div class="stat-label">Security Score</div>
+                </div>
+            </div>
+            <div class="stat-card" onclick="showLastAccess()">
+                <div class="stat-icon">
+                    <i class="fas fa-eye"></i>
+                </div>
+                <div class="stat-info">
+                    <div class="stat-number" id="lastAccessCount">0</div>
+                    <div class="stat-label">Recent Access</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
     <!-- Search and Filter -->
     <div class="search-section">
         <form class="search-form" method="GET" action="{{ url_for('search') }}">
@@ -49,12 +93,40 @@
                 <i class="fas fa-star"></i> Favorites
             </button>
         </div>
+        
+        <!-- Bulk Actions Bar -->
+        <div id="bulkActionsBar" class="bulk-actions-bar" style="display: none;">
+            <div class="bulk-info">
+                <span id="selectedCount">0</span> passwords selected
+            </div>
+            <div class="bulk-buttons">
+                <button class="btn-secondary" onclick="exportSelected()">
+                    <i class="fas fa-download"></i> Export Selected
+                </button>
+                <button class="btn-danger" onclick="deleteSelected()">
+                    <i class="fas fa-trash"></i> Delete Selected
+                </button>
+                <button class="btn-secondary" onclick="clearSelection()">
+                    <i class="fas fa-times"></i> Clear Selection
+                </button>
+            </div>
+        </div>
+        
+        <!-- Security Reminders -->
+        <div id="securityReminders" class="security-reminders" style="display: none;"></div>
     </div>
     
     {% if passwords %}
     <!-- Password List -->
     <div class="password-list">
         <div class="list-header">
+            <div class="selection-controls">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
+                    <label for="selectAll">Select All</label>
+                </div>
+            </div>
+            
             <div class="sort-options">
                 <label for="sortBy">Sort by:</label>
                 <select id="sortBy" onchange="sortPasswords(this.value)">
@@ -78,8 +150,11 @@
         
         <div id="passwordContainer" class="password-container list-view">
             {% for password in passwords %}
-            <div class="password-item" data-website="{{ password.website.lower() }}" data-username="{{ password.username.lower() }}" data-date="{{ password.created_at }}">
+            <div class="password-item" data-website="{{ password.website.lower() }}" data-username="{{ password.username.lower() }}" data-date="{{ password.created_at }}" data-id="{{ password.id }}">
                 <div class="password-item-header">
+                    <div class="password-checkbox">
+                        <input type="checkbox" class="password-select" data-id="{{ password.id }}" onchange="updateSelection()">
+                    </div>
                     <div class="password-icon">
                         <i class="fas fa-globe"></i>
                     </div>
@@ -223,7 +298,7 @@
 let currentPasswords = [];
 let currentPasswordData = null;
 
-// Initialize password data
+// Initialize password data and stats
 document.addEventListener('DOMContentLoaded', function() {
     currentPasswords = Array.from(document.querySelectorAll('.password-item')).map(item => ({
         element: item,
@@ -231,6 +306,9 @@ document.addEventListener('DOMContentLoaded', function() {
         username: item.dataset.username,
         date: item.dataset.date
     }));
+    
+    calculateStats();
+    checkSecurityReminders();
 });
 
 function filterPasswords(filter) {
@@ -386,6 +464,272 @@ function confirmDelete(passwordId, website) {
     document.getElementById('deleteWebsite').textContent = website;
     document.getElementById('deleteForm').action = `/delete_password/${passwordId}`;
     openModal('deleteModal');
+}
+
+function calculateStats() {
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
+    // Calculate recent passwords (added this week)
+    const recentPasswords = currentPasswords.filter(password => {
+        const passwordDate = new Date(password.date);
+        return passwordDate >= oneWeekAgo;
+    });
+    
+    // Update recent count
+    const recentCountEl = document.getElementById('recentCount');
+    if (recentCountEl) {
+        recentCountEl.textContent = recentPasswords.length;
+    }
+    
+    // Calculate basic security score (this would be more sophisticated in a real implementation)
+    const totalPasswords = currentPasswords.length;
+    let securityScore = 85; // Base score
+    
+    if (totalPasswords < 5) securityScore -= 15;
+    if (recentPasswords.length === 0 && totalPasswords > 10) securityScore -= 10;
+    
+    const securityScoreEl = document.getElementById('securityScore');
+    if (securityScoreEl) {
+        securityScoreEl.textContent = securityScore + '%';
+        // Color code the security score
+        const statCard = securityScoreEl.closest('.stat-card');
+        if (securityScore >= 80) {
+            statCard.style.borderLeftColor = 'var(--success)';
+        } else if (securityScore >= 60) {
+            statCard.style.borderLeftColor = 'var(--warning)';
+        } else {
+            statCard.style.borderLeftColor = 'var(--danger)';
+        }
+    }
+    
+    // Update last access count (simulated for now)
+    const lastAccessEl = document.getElementById('lastAccessCount');
+    if (lastAccessEl) {
+        // This would track actual access in a real implementation
+        lastAccessEl.textContent = Math.min(recentPasswords.length, 5);
+    }
+}
+
+function showLastAccess() {
+    showToast('Last access tracking feature coming soon!', 'info');
+}
+
+// Bulk operations
+function toggleSelectAll(isChecked) {
+    const checkboxes = document.querySelectorAll('.password-select');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = isChecked;
+        const item = checkbox.closest('.password-item');
+        if (isChecked) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    });
+    updateSelection();
+}
+
+function updateSelection() {
+    const checkboxes = document.querySelectorAll('.password-select');
+    const checkedBoxes = document.querySelectorAll('.password-select:checked');
+    const selectedCount = checkedBoxes.length;
+    
+    // Update selected count
+    document.getElementById('selectedCount').textContent = selectedCount;
+    
+    // Show/hide bulk actions bar
+    const bulkActionsBar = document.getElementById('bulkActionsBar');
+    if (selectedCount > 0) {
+        bulkActionsBar.style.display = 'flex';
+    } else {
+        bulkActionsBar.style.display = 'none';
+    }
+    
+    // Update select all checkbox
+    const selectAllCheckbox = document.getElementById('selectAll');
+    selectAllCheckbox.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+    selectAllCheckbox.checked = selectedCount === checkboxes.length;
+    
+    // Update item styling
+    checkboxes.forEach(checkbox => {
+        const item = checkbox.closest('.password-item');
+        if (checkbox.checked) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    });
+}
+
+function clearSelection() {
+    const checkboxes = document.querySelectorAll('.password-select');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+        checkbox.closest('.password-item').classList.remove('selected');
+    });
+    updateSelection();
+}
+
+function exportSelected() {
+    const selectedIds = Array.from(document.querySelectorAll('.password-select:checked'))
+        .map(checkbox => checkbox.dataset.id);
+    
+    if (selectedIds.length === 0) {
+        showToast('Please select passwords to export', 'warning');
+        return;
+    }
+    
+    showToast(`Export feature for ${selectedIds.length} passwords coming soon!`, 'info');
+}
+
+function deleteSelected() {
+    const selectedIds = Array.from(document.querySelectorAll('.password-select:checked'))
+        .map(checkbox => checkbox.dataset.id);
+    
+    if (selectedIds.length === 0) {
+        showToast('Please select passwords to delete', 'warning');
+        return;
+    }
+    
+    if (confirm(`Are you sure you want to delete ${selectedIds.length} selected passwords? This action cannot be undone.`)) {
+        // In a real implementation, you would send these IDs to the server for bulk deletion
+        showToast(`Bulk delete feature for ${selectedIds.length} passwords coming soon!`, 'info');
+    }
+}
+
+// Security reminders
+function checkSecurityReminders() {
+    const reminders = [];
+    const now = new Date();
+    const sixMonthsAgo = new Date(now.getTime() - 6 * 30 * 24 * 60 * 60 * 1000);
+    const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+    
+    // Check for old passwords
+    const oldPasswords = currentPasswords.filter(password => {
+        const passwordDate = new Date(password.date);
+        return passwordDate < sixMonthsAgo;
+    });
+    
+    const veryOldPasswords = currentPasswords.filter(password => {
+        const passwordDate = new Date(password.date);
+        return passwordDate < oneYearAgo;
+    });
+    
+    // Critical reminder for very old passwords
+    if (veryOldPasswords.length > 0) {
+        reminders.push({
+            type: 'critical',
+            icon: 'exclamation-triangle',
+            title: 'Critical Security Alert',
+            message: `${veryOldPasswords.length} passwords are over 1 year old and should be updated immediately for security.`,
+            actions: [
+                { text: 'Update Now', action: () => updateOldPasswords(veryOldPasswords) },
+                { text: 'View List', action: () => showOldPasswordsList(veryOldPasswords) }
+            ]
+        });
+    } else if (oldPasswords.length > 0) {
+        // Warning for moderately old passwords
+        reminders.push({
+            type: 'warning',
+            icon: 'clock',
+            title: 'Password Update Recommended',
+            message: `${oldPasswords.length} passwords are over 6 months old. Consider updating them for better security.`,
+            actions: [
+                { text: 'Review', action: () => showOldPasswordsList(oldPasswords) }
+            ]
+        });
+    }
+    
+    // Check for low password count
+    if (currentPasswords.length < 3) {
+        reminders.push({
+            type: 'info',
+            icon: 'info-circle',
+            title: 'Getting Started',
+            message: 'Add more passwords to fully secure your digital life. Consider importing from your browser.',
+            actions: [
+                { text: 'Add Password', action: () => window.location.href = '/add_password' },
+                { text: 'Import', action: () => window.location.href = '/backup' }
+            ]
+        });
+    }
+    
+    // Check for potential duplicate websites (simplified check)
+    const websites = currentPasswords.map(p => p.website.toLowerCase());
+    const duplicateWebsites = websites.filter((site, index) => websites.indexOf(site) !== index);
+    
+    if (duplicateWebsites.length > 0) {
+        reminders.push({
+            type: 'warning',
+            icon: 'copy',
+            title: 'Duplicate Accounts Detected',
+            message: `You have multiple accounts for some websites. Consider consolidating or organizing them better.`,
+            actions: [
+                { text: 'Review', action: () => showDuplicates() }
+            ]
+        });
+    }
+    
+    displaySecurityReminders(reminders);
+}
+
+function displaySecurityReminders(reminders) {
+    const container = document.getElementById('securityReminders');
+    
+    if (reminders.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.innerHTML = reminders.map(reminder => `
+        <div class="security-reminder ${reminder.type}">
+            <div class="reminder-icon">
+                <i class="fas fa-${reminder.icon}"></i>
+            </div>
+            <div class="reminder-content">
+                <div class="reminder-title">${reminder.title}</div>
+                <div class="reminder-message">${reminder.message}</div>
+            </div>
+            <div class="reminder-actions">
+                ${reminder.actions.map(action => `
+                    <button class="btn-primary" onclick="(${action.action})()">${action.text}</button>
+                `).join('')}
+                <button class="reminder-dismiss" onclick="dismissReminder(this)" title="Dismiss">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+    
+    container.style.display = 'block';
+}
+
+function dismissReminder(button) {
+    const reminder = button.closest('.security-reminder');
+    reminder.style.animation = 'slideUp 0.3s ease';
+    setTimeout(() => {
+        reminder.remove();
+        
+        // Hide container if no reminders left
+        const container = document.getElementById('securityReminders');
+        if (!container.querySelectorAll('.security-reminder').length) {
+            container.style.display = 'none';
+        }
+    }, 300);
+}
+
+function updateOldPasswords(oldPasswords) {
+    showToast(`Found ${oldPasswords.length} old passwords. Password update wizard coming soon!`, 'info');
+}
+
+function showOldPasswordsList(oldPasswords) {
+    const websites = oldPasswords.map(p => p.website).join(', ');
+    alert(`Old passwords found for: ${websites}\n\nConsider updating these passwords for better security.`);
+}
+
+function showDuplicates() {
+    showToast('Duplicate detection feature coming soon!', 'info');
 }
 
 function showToast(message, type = 'info') {

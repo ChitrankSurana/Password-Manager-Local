@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error - Personal Password Manager{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <div class="empty-icon">
+                <i class="fas fa-server"></i>
+            </div>
+            <h1>500 - Server Error</h1>
+            <p>Something went wrong on our end. Please try again later.</p>
+        </div>
+        
+        <div class="security-info">
+            <div class="security-item">
+                <i class="fas fa-shield-alt"></i>
+                <div>
+                    <h3>Your Data is Safe</h3>
+                    <p>This error doesn't affect your stored passwords or data security.</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="dashboard-actions" style="justify-content: center; gap: 1rem; margin-top: 2rem;">
+            <a href="{{ url_for('dashboard') if session.user_session else url_for('index') }}" class="btn-primary">
+                <i class="fas fa-home"></i>
+                {% if session.user_session %}Go to Dashboard{% else %}Go to Login{% endif %}
+            </a>
+            <button onclick="location.reload()" class="btn-secondary">
+                <i class="fas fa-redo"></i>
+                Try Again
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
