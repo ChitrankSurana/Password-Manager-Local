@@ -1,0 +1,29 @@
+QUICK START GUIDE
+=================
+
+🚀 GET STARTED IN 3 STEPS:
+
+1. RUN THE APPLICATION:
+   └─ Double-click "Personal_Password_Manager.exe"
+
+2. CREATE YOUR ACCOUNT:
+   └─ Enter a username (min 3 characters)
+   └─ Create a strong master password (min 8 characters)
+   └─ Click "Create Account"
+
+3. START USING:
+   └─ Add passwords with the "➕ Add Password" button
+   └─ Generate secure passwords with "🎲 Generate"
+   └─ Import existing passwords with "📄 Import CSV"
+
+💡 TIPS:
+- Use the search bar to find passwords quickly
+- Click website groups to expand/collapse entries
+- Hover over buttons to see what they do
+- Change themes in Settings (⚙️)
+
+🔒 SECURITY REMINDER:
+Your master password cannot be recovered if lost!
+Backup the "data" folder regularly.
+
+Happy password managing! 😊
