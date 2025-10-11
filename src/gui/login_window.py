@@ -403,8 +403,8 @@ class LoginWindow(ctk.CTkToplevel):
                 user_agent="Desktop Application"
             )
             
-            # Authentication successful
-            self.after(0, self._on_authentication_success, session_id, username)
+            # Authentication successful - pass password to cache it
+            self.after(0, self._on_authentication_success, session_id, username, password)
             
         except AccountLockedError as e:
             self.after(0, self._on_authentication_error, f"Account locked: {str(e)}")
@@ -414,13 +414,14 @@ class LoginWindow(ctk.CTkToplevel):
             logger.error(f"Login error: {e}")
             self.after(0, self._on_authentication_error, "An unexpected error occurred")
     
-    def _on_authentication_success(self, session_id: str, username: str):
+    def _on_authentication_success(self, session_id: str, username: str, password: str):
         """
         Handle successful authentication
         
         Args:
             session_id (str): Session ID from authentication
             username (str): Authenticated username
+            password (str): Master password for caching
         """
         self._stop_loading()
         
@@ -432,9 +433,9 @@ class LoginWindow(ctk.CTkToplevel):
         # Clear password field for security
         self.password_var.set("")
         
-        # Call success callback
+        # Call success callback with master password for caching
         try:
-            self.on_login_success(session_id, username)
+            self.on_login_success(session_id, username, password)
             self.destroy()
         except Exception as e:
             logger.error(f"Login success callback error: {e}")

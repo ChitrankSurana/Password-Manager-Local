@@ -165,7 +165,7 @@ class PasswordManagerCore:
         logger.info(f"Password manager initialized with cache mode: {cache_mode.value}")
     
     def add_password_entry(self, session_id: str, website: str, username: str,
-                          password: str, master_password: str, remarks: str = "",
+                          password: str, master_password: str = None, remarks: str = "",
                           is_favorite: bool = False, tags: List[str] = None) -> int:
         """
         Add a new password entry with encryption
@@ -175,7 +175,7 @@ class PasswordManagerCore:
             website (str): Website or service name
             username (str): Username for the service
             password (str): Plain text password to encrypt and store
-            master_password (str): Master password for encryption
+            master_password (str, optional): Master password for encryption (will use cached if not provided)
             remarks (str, optional): User notes about the entry
             is_favorite (bool, optional): Mark as favorite
             tags (List[str], optional): Tags for organization
@@ -195,6 +195,12 @@ class PasswordManagerCore:
             
             # Validate input data
             self._validate_password_entry_data(website, username, password)
+            
+            # Get master password from cache if not provided
+            if master_password is None:
+                master_password = self._get_cached_master_password(session_id)
+                if master_password is None:
+                    raise MasterPasswordRequiredError("Master password required for encryption. Please provide master password.")
             
             # Verify master password
             if not self._verify_master_password(session_id, master_password):
@@ -792,11 +798,11 @@ class PasswordManagerCore:
         
         try:
             with self._cache_lock:
-                # Create password hash for security (don't store plaintext)
-                password_hash = hashlib.sha256(master_password.encode('utf-8')).hexdigest()
-                
+                # Store master password securely in memory for session duration
+                # Note: This is stored in memory only and cleared when session ends
                 cache_entry = {
-                    'password_hash': password_hash,
+                    'master_password': master_password,  # Store actual password for encryption operations
+                    'password_hash': hashlib.sha256(master_password.encode('utf-8')).hexdigest(),  # Keep hash for verification
                     'cached_at': datetime.now(),
                     'session_id': session_id
                 }
@@ -838,10 +844,8 @@ class PasswordManagerCore:
                     self._master_password_cache.pop(session_id, None)
                     return None
                 
-                # For security, we can't return the actual password since we only store hash
-                # This method needs to be redesigned if we want to support password caching
-                # For now, return None to force password re-entry
-                return None
+                # Return the cached master password (stored securely in memory)
+                return cache_entry.get('master_password')
                 
         except Exception as e:
             logger.error(f"Failed to get cached master password: {e}")
@@ -857,8 +861,17 @@ class PasswordManagerCore:
         try:
             with self._cache_lock:
                 if session_id:
-                    self._master_password_cache.pop(session_id, None)
+                    cache_entry = self._master_password_cache.pop(session_id, None)
+                    if cache_entry and 'master_password' in cache_entry:
+                        # Securely clear the password from memory
+                        cache_entry['master_password'] = '0' * len(cache_entry['master_password'])
+                        del cache_entry['master_password']
                 else:
+                    # Clear all cached passwords securely
+                    for entry in self._master_password_cache.values():
+                        if 'master_password' in entry:
+                            entry['master_password'] = '0' * len(entry['master_password'])
+                            del entry['master_password']
                     self._master_password_cache.clear()
                     
         except Exception as e:

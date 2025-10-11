@@ -152,8 +152,12 @@ def launch_gui():
         
         main_window_ref = [None]  # Use list to allow modification in nested function
         
-        def on_login_success(session_id: str, username: str):
+        def on_login_success(session_id: str, username: str, master_password: str = None):
             """Callback when login is successful"""
+            # Cache master password for convenience (if provided)
+            if master_password:
+                password_manager._cache_master_password(session_id, master_password)
+            
             # Close the login window
             try:
                 login_window.destroy()

@@ -31,6 +31,7 @@ import hashlib
 import secrets
 import bcrypt
 import logging
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union
@@ -74,7 +75,7 @@ class DatabaseManager:
     """
     
     # Database schema version for migrations
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2  # Updated for user settings and audit logging
     
     # Security settings
     MAX_FAILED_ATTEMPTS = 5  # Lock account after 5 failed attempts
@@ -101,9 +102,12 @@ class DatabaseManager:
         # Ensure the database directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Initialize database schema
+        # Initialize migration manager
+        self._migration_manager = None
+        
+        # Initialize database schema with migration support
         try:
-            self._initialize_database()
+            self._initialize_database_with_migrations()
             logger.info(f"Database initialized successfully at {self.db_path}")
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
@@ -153,6 +157,47 @@ class DatabaseManager:
         finally:
             if connection:
                 connection.close()
+    
+    def _initialize_database_with_migrations(self):
+        """
+        Initialize database with migration support
+        
+        This method handles database initialization and applies any necessary
+        migrations to bring the schema up to the current version. It includes
+        automatic backup creation and safe migration handling.
+        
+        Raises:
+            DatabaseError: If initialization or migration fails
+        """
+        try:
+            # First, ensure basic schema exists (original tables)
+            self._initialize_database()
+            
+            # Initialize migration manager (lazy loading to avoid circular import)
+            if self._migration_manager is None:
+                from .database_migrations import DatabaseMigrationManager
+                self._migration_manager = DatabaseMigrationManager(str(self.db_path))
+            
+            # Check if migrations are needed
+            if self._migration_manager.needs_migration():
+                logger.info("Database migrations required, applying automatically...")
+                
+                # Apply migrations with automatic backup
+                migration_success = self._migration_manager.apply_migrations()
+                
+                if not migration_success:
+                    raise DatabaseError("Database migration failed - see logs for details")
+                
+                logger.info("Database migrations completed successfully")
+                
+                # Clean up old backups (keep last 30 days)
+                self._migration_manager.cleanup_old_backups(keep_days=30)
+            else:
+                logger.info("Database schema is up to date")
+                
+        except Exception as e:
+            logger.error(f"Database initialization with migrations failed: {e}")
+            raise DatabaseError(f"Failed to initialize database with migrations: {e}")
     
     def _initialize_database(self):
         """
@@ -788,6 +833,357 @@ class DatabaseManager:
         except Exception:
             return False
     
+    # ==========================================
+    # USER SETTINGS METHODS (New in Version 2)
+    # ==========================================
+    
+    def get_user_setting(self, user_id: int, category: str, key: str) -> Optional[str]:
+        """
+        Get a specific user setting value
+        
+        Args:
+            user_id (int): User ID to get setting for
+            category (str): Setting category (e.g., 'password_viewing')
+            key (str): Setting key (e.g., 'view_timeout_minutes')
+            
+        Returns:
+            Optional[str]: Setting value or None if not found
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT setting_value FROM user_settings
+                    WHERE user_id = ? AND setting_category = ? AND setting_key = ?
+                """, (user_id, category, key))
+                
+                result = cursor.fetchone()
+                return result['setting_value'] if result else None
+                
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get user setting: {e}")
+            return None
+    
+    def set_user_setting(self, user_id: int, category: str, key: str, value: str) -> bool:
+        """
+        Set a user setting value
+        
+        Args:
+            user_id (int): User ID to set setting for
+            category (str): Setting category
+            key (str): Setting key
+            value (str): Setting value (stored as string, can be JSON)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO user_settings 
+                    (user_id, setting_category, setting_key, setting_value, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (user_id, category, key, value))
+                
+                conn.commit()
+                logger.debug(f"User setting saved: {category}.{key} for user {user_id}")
+                return True
+                
+        except sqlite3.Error as e:
+            logger.error(f"Failed to set user setting: {e}")
+            return False
+    
+    def get_all_user_settings(self, user_id: int) -> Dict[str, Dict[str, str]]:
+        """
+        Get all settings for a user organized by category
+        
+        Args:
+            user_id (int): User ID to get settings for
+            
+        Returns:
+            Dict[str, Dict[str, str]]: Settings organized by category and key
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT setting_category, setting_key, setting_value
+                    FROM user_settings
+                    WHERE user_id = ?
+                    ORDER BY setting_category, setting_key
+                """, (user_id,))
+                
+                settings = {}
+                for row in cursor.fetchall():
+                    category = row['setting_category']
+                    key = row['setting_key']
+                    value = row['setting_value']
+                    
+                    if category not in settings:
+                        settings[category] = {}
+                    
+                    settings[category][key] = value
+                
+                return settings
+                
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get all user settings: {e}")
+            return {}
+    
+    def delete_user_setting(self, user_id: int, category: str, key: str) -> bool:
+        """
+        Delete a specific user setting
+        
+        Args:
+            user_id (int): User ID
+            category (str): Setting category
+            key (str): Setting key
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    DELETE FROM user_settings
+                    WHERE user_id = ? AND setting_category = ? AND setting_key = ?
+                """, (user_id, category, key))
+                
+                conn.commit()
+                return cursor.rowcount > 0
+                
+        except sqlite3.Error as e:
+            logger.error(f"Failed to delete user setting: {e}")
+            return False
+    
+    # ==========================================
+    # SECURITY AUDIT LOG METHODS (New in Version 2)
+    # ==========================================
+    
+    def log_security_event(self, user_id: int, session_id: str, action_type: str, 
+                          action_result: str = 'SUCCESS', target_entry_id: Optional[int] = None,
+                          error_message: Optional[str] = None, action_details: Optional[Dict] = None,
+                          security_level: str = 'MEDIUM', risk_score: int = 0,
+                          execution_time_ms: int = 0) -> bool:
+        """
+        Log a security event to the audit log
+        
+        Args:
+            user_id (int): User who performed the action
+            session_id (str): Session ID
+            action_type (str): Type of action (e.g., 'VIEW_PASSWORD', 'DELETE_PASSWORD')
+            action_result (str): Result of action ('SUCCESS', 'FAILURE', 'PARTIAL')
+            target_entry_id (int, optional): Password entry ID if applicable
+            error_message (str, optional): Error details if action failed
+            action_details (Dict, optional): Additional action details
+            security_level (str): Security level ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')
+            risk_score (int): Risk assessment score (0-100)
+            execution_time_ms (int): How long the action took in milliseconds
+            
+        Returns:
+            bool: True if logged successfully, False otherwise
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Convert action_details dict to JSON string
+                details_json = json.dumps(action_details) if action_details else None
+                
+                cursor.execute("""
+                    INSERT INTO security_audit_log 
+                    (user_id, session_id, action_type, action_result, target_entry_id,
+                     error_message, action_details, security_level, risk_score, 
+                     execution_time_ms, client_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2.0.0')
+                """, (user_id, session_id, action_type, action_result, target_entry_id,
+                      error_message, details_json, security_level, risk_score, 
+                      execution_time_ms))
+                
+                conn.commit()
+                logger.debug(f"Security event logged: {action_type} by user {user_id}")
+                return True
+                
+        except sqlite3.Error as e:
+            logger.error(f"Failed to log security event: {e}")
+            return False
+    
+    def get_security_audit_log(self, user_id: Optional[int] = None, 
+                             action_type: Optional[str] = None,
+                             limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Retrieve security audit log entries with optional filtering
+        
+        Args:
+            user_id (int, optional): Filter by specific user
+            action_type (str, optional): Filter by specific action type
+            limit (int): Maximum number of entries to return
+            offset (int): Number of entries to skip (for pagination)
+            
+        Returns:
+            List[Dict[str, Any]]: List of audit log entries
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Build query with optional filters
+                query = """
+                    SELECT * FROM security_audit_log
+                    WHERE 1=1
+                """
+                params = []
+                
+                if user_id is not None:
+                    query += " AND user_id = ?"
+                    params.append(user_id)
+                
+                if action_type is not None:
+                    query += " AND action_type = ?"
+                    params.append(action_type)
+                
+                query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+                
+                cursor.execute(query, params)
+                
+                entries = []
+                for row in cursor.fetchall():
+                    entry = dict(row)
+                    
+                    # Parse JSON action_details if present
+                    if entry['action_details']:
+                        try:
+                            entry['action_details'] = json.loads(entry['action_details'])
+                        except json.JSONDecodeError:
+                            entry['action_details'] = None
+                    
+                    entries.append(entry)
+                
+                return entries
+                
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get security audit log: {e}")
+            return []
+    
+    def get_security_stats(self, user_id: int, days: int = 30) -> Dict[str, Any]:
+        """
+        Get security statistics for a user over specified time period
+        
+        Args:
+            user_id (int): User ID to get stats for
+            days (int): Number of days to look back
+            
+        Returns:
+            Dict[str, Any]: Security statistics
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Calculate date threshold
+                cutoff_date = datetime.now() - timedelta(days=days)
+                
+                # Get overall activity counts
+                cursor.execute("""
+                    SELECT 
+                        action_type,
+                        action_result,
+                        COUNT(*) as count
+                    FROM security_audit_log
+                    WHERE user_id = ? AND timestamp >= ?
+                    GROUP BY action_type, action_result
+                    ORDER BY count DESC
+                """, (user_id, cutoff_date))
+                
+                activity_stats = {}
+                for row in cursor.fetchall():
+                    action = row['action_type']
+                    result = row['action_result']
+                    count = row['count']
+                    
+                    if action not in activity_stats:
+                        activity_stats[action] = {'SUCCESS': 0, 'FAILURE': 0, 'PARTIAL': 0}
+                    
+                    activity_stats[action][result] = count
+                
+                # Get risk level distribution
+                cursor.execute("""
+                    SELECT security_level, COUNT(*) as count
+                    FROM security_audit_log
+                    WHERE user_id = ? AND timestamp >= ?
+                    GROUP BY security_level
+                """, (user_id, cutoff_date))
+                
+                risk_distribution = {row['security_level']: row['count'] for row in cursor.fetchall()}
+                
+                # Get recent high-risk events
+                cursor.execute("""
+                    SELECT action_type, timestamp, action_details, risk_score
+                    FROM security_audit_log
+                    WHERE user_id = ? AND security_level IN ('HIGH', 'CRITICAL') 
+                      AND timestamp >= ?
+                    ORDER BY timestamp DESC
+                    LIMIT 10
+                """, (user_id, cutoff_date))
+                
+                high_risk_events = []
+                for row in cursor.fetchall():
+                    event = dict(row)
+                    if event['action_details']:
+                        try:
+                            event['action_details'] = json.loads(event['action_details'])
+                        except json.JSONDecodeError:
+                            event['action_details'] = None
+                    high_risk_events.append(event)
+                
+                return {
+                    'time_period_days': days,
+                    'activity_stats': activity_stats,
+                    'risk_distribution': risk_distribution,
+                    'high_risk_events': high_risk_events,
+                    'total_events': sum(sum(stats.values()) for stats in activity_stats.values())
+                }
+                
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get security stats: {e}")
+            return {}
+    
+    def cleanup_old_audit_logs(self, days_to_keep: int = 90) -> int:
+        """
+        Clean up old audit log entries (except critical security events)
+        
+        Args:
+            days_to_keep (int): Number of days of logs to keep
+            
+        Returns:
+            int: Number of entries deleted
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Calculate cutoff date
+                cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+                
+                # Delete old entries except critical ones
+                cursor.execute("""
+                    DELETE FROM security_audit_log
+                    WHERE timestamp < ? AND security_level NOT IN ('CRITICAL')
+                """, (cutoff_date,))
+                
+                deleted_count = cursor.rowcount
+                conn.commit()
+                
+                logger.info(f"Cleaned up {deleted_count} old audit log entries")
+                return deleted_count
+                
+        except sqlite3.Error as e:
+            logger.error(f"Failed to cleanup audit logs: {e}")
+            return 0
+
     def close(self):
         """
         Close the database manager and clean up resources
