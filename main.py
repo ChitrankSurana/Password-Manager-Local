@@ -149,52 +149,66 @@ def launch_gui():
         # Initialize managers
         auth_manager = AuthenticationManager()
         password_manager = PasswordManagerCore(auth_manager=auth_manager)
-        
+
         main_window_ref = [None]  # Use list to allow modification in nested function
-        
-        def on_login_success(session_id: str, username: str, master_password: str = None):
-            """Callback when login is successful"""
-            # Cache master password for convenience (if provided)
-            if master_password:
-                password_manager._cache_master_password(session_id, master_password)
-            
-            # Close the login window
-            try:
-                login_window.destroy()
-            except:
-                pass
-            
-            # Create main window
-            main_window = MainWindow(
-                session_id=session_id,
-                username=username,
-                password_manager=password_manager,
-                auth_manager=auth_manager,
-                parent=root
-            )
-            main_window_ref[0] = main_window
-            
-            # When main window closes, logout and quit the application
-            def on_main_window_close():
+        login_window_ref = [None]  # Use list to allow modification in nested function
+
+        def show_login_window():
+            """Show the login window"""
+            def on_login_success(session_id: str, username: str, master_password: str = None):
+                """Callback when login is successful"""
+                # Cache master password for convenience (if provided)
+                if master_password:
+                    password_manager._cache_master_password(session_id, master_password)
+
+                # Close the login window
                 try:
-                    auth_manager.logout_user(session_id)
+                    if login_window_ref[0]:
+                        login_window_ref[0].destroy()
+                        login_window_ref[0] = None
                 except:
                     pass
-                try:
-                    main_window.destroy()
-                except:
-                    pass
+
+                # Create main window with logout callback
+                def on_logout():
+                    """Callback when user logs out - reopen login window"""
+                    show_login_window()
+
+                main_window = MainWindow(
+                    session_id=session_id,
+                    username=username,
+                    password_manager=password_manager,
+                    auth_manager=auth_manager,
+                    parent=root,
+                    on_logout_callback=on_logout
+                )
+                main_window_ref[0] = main_window
+
+                # When main window is closed via X button, logout and quit
+                def on_main_window_close():
+                    try:
+                        auth_manager.logout_user(session_id)
+                    except:
+                        pass
+                    try:
+                        main_window.destroy()
+                    except:
+                        pass
+                    root.quit()
+
+                main_window.protocol("WM_DELETE_WINDOW", on_main_window_close)
+
+            def on_login_window_close():
+                """Handle login window close - quit application"""
                 root.quit()
-            
-            main_window.protocol("WM_DELETE_WINDOW", on_main_window_close)
-        
-        def on_login_window_close():
-            """Handle login window close"""
-            root.quit()
-        
-        # Create login window
-        login_window = LoginWindow(auth_manager, on_login_success, parent=root)
-        login_window.protocol("WM_DELETE_WINDOW", on_login_window_close)
+
+            # Create login window
+            login_window = LoginWindow(auth_manager, on_login_success, parent=root)
+            login_window.protocol("WM_DELETE_WINDOW", on_login_window_close)
+            login_window_ref[0] = login_window
+
+        # Start by showing the login window
+        show_login_window()
         
         # Start the application
         root.mainloop()

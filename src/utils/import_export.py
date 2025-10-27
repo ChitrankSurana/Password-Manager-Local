@@ -215,32 +215,28 @@ class BackupManager:
             logger.error(f"Database restore failed: {e}")
             raise BackupError(f"Failed to restore database backup: {e}")
     
-    def export_encrypted_data(self, session_id: str, master_password: str,
-                             export_format: str = "json", 
+    def export_encrypted_data(self, user_id: int, username: str, master_password: str,
+                             export_format: str = "json",
                              include_metadata: bool = True) -> str:
         """
         Export all password data in encrypted format
-        
+
         Args:
-            session_id (str): Valid session ID
+            user_id (int): User ID
+            username (str): Username for export metadata
             master_password (str): Master password for encryption
             export_format (str): Export format (json, csv, xml)
             include_metadata (bool): Include creation/modification dates
-            
+
         Returns:
             str: Path to the created export file
-            
+
         Raises:
             ExportError: If export fails
         """
         try:
-            # Validate session and get user info
-            from ..core.auth import AuthenticationManager
-            auth_manager = AuthenticationManager(str(self.db_path))
-            session = auth_manager.validate_session(session_id)
-            
             # Get all password entries for user
-            entries = self.db_manager.get_password_entries(session.user_id)
+            entries = self.db_manager.get_password_entries(user_id)
             
             # Decrypt passwords
             decrypted_entries = []
@@ -273,13 +269,13 @@ class BackupManager:
             
             # Export in requested format
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
+
             if export_format.lower() == "json":
-                export_path = self._export_json(decrypted_entries, session.username, timestamp)
+                export_path = self._export_json(decrypted_entries, username, timestamp)
             elif export_format.lower() == "csv":
-                export_path = self._export_csv(decrypted_entries, session.username, timestamp)
+                export_path = self._export_csv(decrypted_entries, username, timestamp)
             elif export_format.lower() == "xml":
-                export_path = self._export_xml(decrypted_entries, session.username, timestamp)
+                export_path = self._export_xml(decrypted_entries, username, timestamp)
             else:
                 raise ExportError(f"Unsupported export format: {export_format}")
             
@@ -296,20 +292,20 @@ class BackupManager:
             logger.error(f"Data export failed: {e}")
             raise ExportError(f"Failed to export data: {e}")
     
-    def import_encrypted_data(self, session_id: str, master_password: str,
+    def import_encrypted_data(self, user_id: int, master_password: str,
                              import_file_path: str, merge_mode: bool = True) -> Dict[str, Any]:
         """
         Import data from encrypted export file
-        
+
         Args:
-            session_id (str): Valid session ID
+            user_id (int): User ID
             master_password (str): Master password for decryption
             import_file_path (str): Path to encrypted import file
             merge_mode (bool): True to merge, False to replace
-            
+
         Returns:
             Dict[str, Any]: Import results summary
-            
+
         Raises:
             ImportError: If import fails
         """
@@ -317,22 +313,17 @@ class BackupManager:
             import_path = Path(import_file_path)
             if not import_path.exists():
                 raise ImportError(f"Import file not found: {import_path}")
-            
+
             # Decrypt import file
             decrypted_path = self._decrypt_import_file(import_path, master_password)
-            
+
             try:
                 # Load and validate data
                 import_data = self._load_import_data(decrypted_path)
-                
-                # Validate session
-                from ..core.auth import AuthenticationManager
-                auth_manager = AuthenticationManager(str(self.db_path))
-                session = auth_manager.validate_session(session_id)
-                
+
                 # Import data
                 results = self._import_password_entries(
-                    session.user_id, import_data, master_password, merge_mode
+                    user_id, import_data, master_password, merge_mode
                 )
                 
                 logger.info(f"Data imported successfully: {results}")
@@ -347,20 +338,85 @@ class BackupManager:
             logger.error(f"Data import failed: {e}")
             raise ImportError(f"Failed to import data: {e}")
     
-    def import_browser_passwords(self, session_id: str, master_password: str,
+    def export_plain_csv(self, user_id: int, username: str, master_password: str,
+                        output_path: str) -> str:
+        """
+        Export password data as plain (unencrypted) CSV for Excel
+
+        WARNING: This creates an UNENCRYPTED file. Use with caution!
+
+        Args:
+            user_id (int): User ID
+            username (str): Username for export metadata
+            master_password (str): Master password to decrypt stored passwords
+            output_path (str): Path where CSV should be saved
+
+        Returns:
+            str: Path to the created CSV file
+
+        Raises:
+            ExportError: If export fails
+        """
+        try:
+            # Get all password entries for user
+            entries = self.db_manager.get_password_entries(user_id)
+
+            # Decrypt passwords
+            decrypted_entries = []
+            for entry in entries:
+                try:
+                    decrypted_password = self.encryption.decrypt_password(
+                        entry['password_encrypted'], master_password
+                    )
+
+                    entry_data = {
+                        'website': entry['website'],
+                        'username': entry['username'],
+                        'password': decrypted_password,
+                        'remarks': entry.get('remarks', ''),
+                        'is_favorite': bool(entry.get('is_favorite', False)),
+                        'created_at': entry.get('created_at', ''),
+                        'modified_at': entry.get('modified_at', '')
+                    }
+
+                    decrypted_entries.append(entry_data)
+
+                except Exception as e:
+                    logger.error(f"Failed to decrypt entry {entry.get('entry_id')}: {e}")
+                    # Skip corrupted entries but continue export
+                    continue
+
+            # Write to CSV
+            output_path = Path(output_path)
+            with open(output_path, 'w', newline='', encoding='utf-8') as f:
+                fieldnames = ['website', 'username', 'password', 'remarks', 'is_favorite', 'created_at', 'modified_at']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+                writer.writeheader()
+                for entry in decrypted_entries:
+                    writer.writerow(entry)
+
+            logger.info(f"Plain CSV exported: {output_path}")
+            return str(output_path)
+
+        except Exception as e:
+            logger.error(f"Plain CSV export failed: {e}")
+            raise ExportError(f"Failed to export plain CSV: {e}")
+
+    def import_browser_passwords(self, user_id: int, master_password: str,
                                 browser_type: str, csv_file_path: str) -> Dict[str, Any]:
         """
         Import passwords from browser CSV export
-        
+
         Args:
-            session_id (str): Valid session ID
+            user_id (int): User ID
             master_password (str): Master password for encryption
             browser_type (str): Browser type (chrome, firefox, edge)
             csv_file_path (str): Path to browser CSV export
-            
+
         Returns:
             Dict[str, Any]: Import results summary
-            
+
         Raises:
             ImportError: If import fails
         """
@@ -368,18 +424,13 @@ class BackupManager:
             csv_path = Path(csv_file_path)
             if not csv_path.exists():
                 raise ImportError(f"CSV file not found: {csv_path}")
-            
+
             # Parse browser CSV
             browser_entries = self._parse_browser_csv(csv_path, browser_type)
-            
-            # Validate session
-            from ..core.auth import AuthenticationManager
-            auth_manager = AuthenticationManager(str(self.db_path))
-            session = auth_manager.validate_session(session_id)
-            
+
             # Import entries
             results = self._import_password_entries(
-                session.user_id, browser_entries, master_password, merge_mode=True
+                user_id, browser_entries, master_password, merge_mode=True
             )
             
             logger.info(f"Browser passwords imported: {results}")

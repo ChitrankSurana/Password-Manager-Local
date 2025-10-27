@@ -27,18 +27,29 @@ logger = logging.getLogger(__name__)
 
 class BackupManagerDialog(ctk.CTkToplevel):
     """Comprehensive backup and restore management dialog"""
-    
-    def __init__(self, parent, session_id, password_manager):
+
+    def __init__(self, parent, session_id, password_manager, auth_manager):
         super().__init__(parent)
-        
+
         self.session_id = session_id
         self.password_manager = password_manager
+        self.auth_manager = auth_manager
         self.theme = get_theme()
         self.backup_manager = BackupManager()
-        
+
+        # Validate session and get user info
+        try:
+            session = self.auth_manager.validate_session(session_id)
+            self.user_id = session.user_id
+            self.username = session.username
+        except Exception as e:
+            messagebox.showerror("Session Error", f"Invalid session: {e}")
+            self.destroy()
+            return
+
         # UI state
         self.is_loading = False
-        
+
         self._setup_dialog()
         self._create_ui()
         self._load_backup_list()
@@ -222,6 +233,41 @@ class BackupManagerDialog(ctk.CTkToplevel):
             command=self._export_data
         )
         export_btn.pack(pady=(0, spacing["padding_md"]))
+
+        # Plain CSV export section (for Excel)
+        plain_export_frame = ctk.CTkFrame(export_tab)
+        plain_export_frame.pack(fill="x", padx=spacing["padding_md"], pady=(0, spacing["padding_md"]))
+
+        plain_export_label = create_themed_label(
+            plain_export_frame,
+            "Export Plain CSV (for Excel)",
+            "label"
+        )
+        plain_export_label.configure(font=self.theme.get_fonts()["body_large"])
+        plain_export_label.pack(padx=spacing["padding_md"], pady=(spacing["padding_md"], spacing["padding_sm"]))
+
+        plain_export_warning = create_themed_label(
+            plain_export_frame,
+            "⚠️ WARNING: Creates UNENCRYPTED CSV file. Passwords are visible in plain text!",
+            "label_secondary"
+        )
+        plain_export_warning.configure(text_color=self.theme.get_colors()["warning"])
+        plain_export_warning.pack(padx=spacing["padding_md"], pady=(0, spacing["padding_sm"]))
+
+        plain_export_desc = create_themed_label(
+            plain_export_frame,
+            "Use this only for temporary use in Excel. Delete the file after use.",
+            "label_secondary"
+        )
+        plain_export_desc.pack(padx=spacing["padding_md"], pady=(0, spacing["padding_sm"]))
+
+        plain_export_btn = create_themed_button(
+            plain_export_frame,
+            text="📊 Export Plain CSV for Excel",
+            style="button_secondary",
+            command=self._export_plain_csv
+        )
+        plain_export_btn.pack(pady=(0, spacing["padding_md"]))
     
     def _create_import_tab(self):
         """Create data import tab"""
@@ -269,28 +315,62 @@ class BackupManagerDialog(ctk.CTkToplevel):
         # Browser selection
         browser_frame = ctk.CTkFrame(browser_import_frame, fg_color="transparent")
         browser_frame.pack(fill="x", padx=spacing["padding_md"], pady=spacing["padding_sm"])
-        
+
         self.browser_type_var = ctk.StringVar(value="chrome")
-        
-        chrome_radio = ctk.CTkRadioButton(browser_frame, text="Chrome", 
+
+        chrome_radio = ctk.CTkRadioButton(browser_frame, text="Chrome",
                                          variable=self.browser_type_var, value="chrome")
         chrome_radio.pack(side="left")
-        
-        firefox_radio = ctk.CTkRadioButton(browser_frame, text="Firefox", 
+
+        firefox_radio = ctk.CTkRadioButton(browser_frame, text="Firefox",
                                           variable=self.browser_type_var, value="firefox")
         firefox_radio.pack(side="left", padx=(spacing["padding_md"], 0))
-        
-        edge_radio = ctk.CTkRadioButton(browser_frame, text="Edge", 
+
+        edge_radio = ctk.CTkRadioButton(browser_frame, text="Edge",
                                        variable=self.browser_type_var, value="edge")
         edge_radio.pack(side="left", padx=(spacing["padding_md"], 0))
-        
-        import_browser_btn = create_themed_button(
-            browser_import_frame,
-            text="📥 Import Browser CSV",
+
+        # File selection section
+        file_selection_frame = ctk.CTkFrame(browser_import_frame, fg_color="transparent")
+        file_selection_frame.pack(fill="x", padx=spacing["padding_md"], pady=spacing["padding_sm"])
+
+        # Selected file label
+        self.browser_csv_file_label = create_themed_label(
+            file_selection_frame,
+            "No file selected",
+            "label_secondary"
+        )
+        self.browser_csv_file_label.pack(anchor="w", pady=(0, spacing["padding_xs"]))
+
+        # Buttons frame
+        buttons_frame = ctk.CTkFrame(file_selection_frame, fg_color="transparent")
+        buttons_frame.pack(fill="x")
+
+        # Browse button
+        browse_btn = create_themed_button(
+            buttons_frame,
+            text="📂 Browse CSV File",
             style="button_secondary",
+            command=self._browse_csv_file
+        )
+        browse_btn.pack(side="left", padx=(0, spacing["padding_sm"]))
+
+        # Import button (disabled by default)
+        self.import_csv_btn = create_themed_button(
+            buttons_frame,
+            text="📥 Start Import",
+            style="button_primary",
             command=self._import_browser_passwords
         )
-        import_browser_btn.pack(pady=(0, spacing["padding_md"]))
+        self.import_csv_btn.configure(state="disabled")
+        self.import_csv_btn.pack(side="left")
+
+        # Store selected file path
+        self.selected_csv_file = None
+
+        # Add spacing at bottom
+        spacer = ctk.CTkFrame(browser_import_frame, fg_color="transparent", height=spacing["padding_md"])
+        spacer.pack()
     
     def _create_status_area(self, parent):
         """Create status area for progress and messages"""
@@ -436,18 +516,21 @@ class BackupManagerDialog(ctk.CTkToplevel):
             "Enter your master password to encrypt the export:",
             show='*'
         )
-        
+
         if not master_password:
             return
-        
-        # Choose export location
+
+        # Choose export location with auto-generated filename
         export_format = self.export_format_var.get()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = filedialog.asksaveasfilename(
             defaultextension=f".{export_format}.encrypted",
             filetypes=[
-                ("Encrypted files", "*.encrypted"),
+                (f"Encrypted {export_format.upper()} files", f"*.{export_format}.encrypted"),
+                ("All encrypted files", "*.encrypted"),
                 ("All files", "*.*")
             ],
+            initialfile=f"{self.username}_passwords_{timestamp}.{export_format}.encrypted",
             title="Save Export As"
         )
         
@@ -468,12 +551,12 @@ class BackupManagerDialog(ctk.CTkToplevel):
         try:
             # Use the temporary filename from the export process
             temp_export = self.backup_manager.export_encrypted_data(
-                self.session_id, master_password, export_format
+                self.user_id, self.username, master_password, export_format
             )
-            
+
             # Move to desired location
             shutil.move(temp_export, filename)
-            
+
             self.after(0, self._on_export_completed, filename)
         except Exception as e:
             self.after(0, self._on_export_error, str(e))
@@ -489,6 +572,81 @@ class BackupManagerDialog(ctk.CTkToplevel):
         self._stop_loading()
         self._show_error(f"Export failed: {error_message}")
         messagebox.showerror("Export Error", f"Failed to export data:\n{error_message}")
+
+    def _export_plain_csv(self):
+        """Export plain CSV for Excel"""
+        # Show security warning
+        proceed = messagebox.askokcancel(
+            "Security Warning",
+            "⚠️ WARNING: This will create an UNENCRYPTED CSV file!\n\n"
+            "Your passwords will be visible in plain text.\n\n"
+            "Only use this feature if:\n"
+            "• You need to open the file in Excel temporarily\n"
+            "• You're on a secure, private computer\n"
+            "• You will delete the file immediately after use\n\n"
+            "Do you want to continue?",
+            icon='warning'
+        )
+
+        if not proceed:
+            return
+
+        # Get master password
+        master_password = simpledialog.askstring(
+            "Master Password",
+            "Enter your master password to decrypt the passwords:",
+            show='*'
+        )
+
+        if not master_password:
+            return
+
+        # Choose save location with auto-generated filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[
+                ("CSV files", "*.csv"),
+                ("All files", "*.*")
+            ],
+            initialfile=f"{self.username}_passwords_{timestamp}.csv",
+            title="Save Plain CSV As"
+        )
+
+        if not filename:
+            return
+
+        self._start_loading("Exporting plain CSV...")
+
+        # Run export in background
+        threading.Thread(
+            target=self._export_plain_csv_background,
+            args=(master_password, filename),
+            daemon=True
+        ).start()
+
+    def _export_plain_csv_background(self, master_password: str, filename: str):
+        """Export plain CSV in background thread"""
+        try:
+            # Export plain CSV
+            self.backup_manager.export_plain_csv(
+                self.user_id, self.username, master_password, filename
+            )
+
+            self.after(0, self._on_plain_csv_exported, filename)
+        except Exception as e:
+            self.after(0, self._on_export_error, str(e))
+
+    def _on_plain_csv_exported(self, filename: str):
+        """Handle successful plain CSV export"""
+        self._stop_loading()
+        self._show_success("Plain CSV exported successfully")
+        messagebox.showinfo(
+            "Export Complete",
+            f"Plain CSV exported to:\n{filename}\n\n"
+            "⚠️ REMINDER: This file is UNENCRYPTED!\n"
+            "Delete it immediately after use."
+        )
     
     def _import_export_file(self):
         """Import from encrypted export file"""
@@ -536,7 +694,7 @@ class BackupManagerDialog(ctk.CTkToplevel):
         """Import data in background thread"""
         try:
             results = self.backup_manager.import_encrypted_data(
-                self.session_id, master_password, filename, merge_mode
+                self.user_id, master_password, filename, merge_mode
             )
             self.after(0, self._on_import_completed, results)
         except Exception as e:
@@ -546,7 +704,7 @@ class BackupManagerDialog(ctk.CTkToplevel):
         """Handle successful import"""
         self._stop_loading()
         self._show_success("Import completed successfully")
-        
+
         message = (
             f"Import completed!\n\n"
             f"Imported: {results['imported_count']} entries\n"
@@ -554,18 +712,36 @@ class BackupManagerDialog(ctk.CTkToplevel):
             f"Errors: {results['error_count']} entries\n"
             f"Total processed: {results['total_processed']} entries"
         )
-        
+
         messagebox.showinfo("Import Complete", message)
+
+        # Reset the CSV import UI
+        self._reset_csv_import_ui()
+
+    def _reset_csv_import_ui(self):
+        """Reset the CSV import UI after completion"""
+        try:
+            self.selected_csv_file = None
+            self.browser_csv_file_label.configure(
+                text="No file selected",
+                text_color=self.theme.get_colors()["text_secondary"]
+            )
+            self.import_csv_btn.configure(state="disabled")
+        except:
+            # Ignore if UI elements don't exist (for encrypted file imports)
+            pass
     
     def _on_import_error(self, error_message: str):
         """Handle import error"""
         self._stop_loading()
         self._show_error(f"Import failed: {error_message}")
         messagebox.showerror("Import Error", f"Failed to import data:\n{error_message}")
+
+        # Reset the CSV import UI
+        self._reset_csv_import_ui()
     
-    def _import_browser_passwords(self):
-        """Import passwords from browser CSV"""
-        # Select CSV file
+    def _browse_csv_file(self):
+        """Browse for CSV file to import"""
         filename = filedialog.askopenfilename(
             filetypes=[
                 ("CSV files", "*.csv"),
@@ -573,28 +749,58 @@ class BackupManagerDialog(ctk.CTkToplevel):
             ],
             title="Select Browser Password Export CSV"
         )
-        
-        if not filename:
+
+        if filename:
+            # Store the selected file
+            self.selected_csv_file = filename
+
+            # Update the label to show the selected file
+            from pathlib import Path
+            file_display = Path(filename).name
+            if len(file_display) > 50:
+                file_display = file_display[:47] + "..."
+
+            self.browser_csv_file_label.configure(
+                text=f"📄 Selected: {file_display}",
+                text_color=self.theme.get_colors()["text_primary"]
+            )
+
+            # Enable the import button
+            self.import_csv_btn.configure(state="normal")
+        else:
+            # User cancelled
+            self.selected_csv_file = None
+            self.browser_csv_file_label.configure(
+                text="No file selected",
+                text_color=self.theme.get_colors()["text_secondary"]
+            )
+            self.import_csv_btn.configure(state="disabled")
+
+    def _import_browser_passwords(self):
+        """Import passwords from browser CSV"""
+        # Check if file is selected
+        if not self.selected_csv_file:
+            messagebox.showwarning("No File Selected", "Please select a CSV file first.")
             return
-        
+
         # Get master password
         master_password = simpledialog.askstring(
             "Master Password",
             "Enter your master password to encrypt imported passwords:",
             show='*'
         )
-        
+
         if not master_password:
             return
-        
+
         browser_type = self.browser_type_var.get()
-        
+
         self._start_loading(f"Importing {browser_type} passwords...")
-        
+
         # Run import in background
         threading.Thread(
             target=self._import_browser_background,
-            args=(filename, master_password, browser_type),
+            args=(self.selected_csv_file, master_password, browser_type),
             daemon=True
         ).start()
     
@@ -602,7 +808,7 @@ class BackupManagerDialog(ctk.CTkToplevel):
         """Import browser passwords in background thread"""
         try:
             results = self.backup_manager.import_browser_passwords(
-                self.session_id, master_password, browser_type, filename
+                self.user_id, master_password, browser_type, filename
             )
             self.after(0, self._on_import_completed, results)
         except Exception as e:

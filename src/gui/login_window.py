@@ -46,6 +46,33 @@ from ..core.auth import AuthenticationManager, AuthenticationError, AccountLocke
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class ToolTip:
+    """Create a tooltip for a given widget"""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltip = None
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.leave)
+
+    def enter(self, event=None):
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+
+        # Create tooltip window
+        self.tooltip = tk.Toplevel(self.widget)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(self.tooltip, text=self.text, background="lightyellow",
+                        relief="solid", borderwidth=1, font=("Arial", 9))
+        label.pack()
+
+    def leave(self, event=None):
+        if self.tooltip:
+            self.tooltip.destroy()
+            self.tooltip = None
+
 class LoginWindow(ctk.CTkToplevel):
     """
     Modern login window with authentication features
@@ -256,6 +283,7 @@ class LoginWindow(ctk.CTkToplevel):
             command=self._toggle_password_visibility
         )
         self.toggle_password_btn.pack(side="right", padx=(spacing["padding_xs"], 0))
+        ToolTip(self.toggle_password_btn, "Show or hide password")
         
         # Remember user checkbox
         self.remember_checkbox = ctk.CTkCheckBox(
@@ -294,7 +322,8 @@ class LoginWindow(ctk.CTkToplevel):
             command=self._handle_login
         )
         self.login_btn.pack(fill="x", pady=(0, spacing["padding_sm"]))
-        
+        ToolTip(self.login_btn, "Sign in with your username and master password")
+
         # Create account button
         self.create_account_btn = create_themed_button(
             button_frame,
@@ -303,6 +332,7 @@ class LoginWindow(ctk.CTkToplevel):
             command=self._show_create_account_dialog
         )
         self.create_account_btn.pack(fill="x")
+        ToolTip(self.create_account_btn, "Create a new user account")
     
     def _create_footer(self):
         """Create footer with additional options"""
@@ -536,11 +566,19 @@ class LoginWindow(ctk.CTkToplevel):
         self.status_label.configure(text="")
     
     def _load_last_user(self):
-        """Load last used username if remember is enabled"""
+        """Load last used username if remember is enabled and user exists in database"""
         if self.user_prefs.get("remember_user", True):
             last_username = self.user_prefs.get("last_username", "")
             if last_username:
-                self.username_var.set(last_username)
+                # Validate that this user actually exists in the current database
+                # This prevents showing usernames from other databases or fresh installs
+                if self.auth_manager.db_manager.user_exists(last_username):
+                    self.username_var.set(last_username)
+                else:
+                    # Clear the invalid preference
+                    logger.info(f"Last user '{last_username}' not found in database, clearing preference")
+                    self.user_prefs["last_username"] = ""
+                    self._save_user_preferences()
     
     def _set_initial_focus(self):
         """Set initial focus to appropriate field"""
@@ -719,7 +757,8 @@ class CreateAccountDialog(ctk.CTkToplevel):
             command=self._create_account
         )
         self.create_btn.pack(side="right", padx=(spacing["padding_xs"], 0))
-        
+        ToolTip(self.create_btn, "Create new account with entered credentials")
+
         cancel_btn = create_themed_button(
             button_frame,
             text="Cancel",
@@ -727,6 +766,7 @@ class CreateAccountDialog(ctk.CTkToplevel):
             command=self.destroy
         )
         cancel_btn.pack(side="right")
+        ToolTip(cancel_btn, "Cancel account creation and return to login")
     
     def _create_account(self):
         """Handle account creation"""

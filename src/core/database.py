@@ -348,7 +348,31 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to create user '{username}': {e}")
             raise DatabaseError(f"User creation failed: {e}")
-    
+
+    def user_exists(self, username: str) -> bool:
+        """
+        Check if a user exists in the database
+
+        Args:
+            username (str): Username to check
+
+        Returns:
+            bool: True if user exists, False otherwise
+        """
+        if not username or not username.strip():
+            return False
+
+        username = username.strip().lower()
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_id FROM users WHERE username = ?", (username,))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking if user exists '{username}': {e}")
+            return False
+
     def authenticate_user(self, username: str, password: str) -> Optional[Dict[str, Any]]:
         """
         Authenticate a user with username and password
