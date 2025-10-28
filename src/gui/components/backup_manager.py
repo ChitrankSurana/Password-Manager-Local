@@ -7,7 +7,7 @@ This module provides comprehensive backup and restore functionality with export/
 capabilities for the password manager, featuring a modern interface for data management.
 
 Author: Personal Password Manager
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import customtkinter as ctk
@@ -671,30 +671,144 @@ class BackupManagerDialog(ctk.CTkToplevel):
         
         if not master_password:
             return
-        
-        # Confirm merge mode
-        merge_mode = messagebox.askyesno(
-            "Import Mode",
-            "Choose import mode:\n\n"
-            "Yes - Merge with existing data (skip duplicates)\n"
-            "No - Replace existing data\n\n"
-            "Merge mode is recommended for safety."
-        )
-        
+
+        # Show import mode selection dialog
+        import_mode = self._show_import_mode_dialog()
+
+        if import_mode is None:
+            return  # User cancelled
+
         self._start_loading("Importing data...")
-        
+
         # Run import in background
         threading.Thread(
             target=self._import_data_background,
-            args=(filename, master_password, merge_mode),
+            args=(filename, master_password, import_mode),
             daemon=True
         ).start()
-    
-    def _import_data_background(self, filename: str, master_password: str, merge_mode: bool):
+
+    def _show_import_mode_dialog(self):
+        """Show dialog to select import mode with 3 options"""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Choose Import Mode")
+        dialog.geometry("500x350")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Center dialog
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() // 2) - 250
+        y = self.winfo_y() + (self.winfo_height() // 2) - 175
+        dialog.geometry(f"500x350+{x}+{y}")
+
+        selected_mode = [None]  # Use list to allow modification in nested function
+
+        # Title
+        title_label = ctk.CTkLabel(
+            dialog,
+            text="Choose Import Mode",
+            font=("Arial", 18, "bold")
+        )
+        title_label.pack(pady=(20, 10))
+
+        # Description
+        desc_label = ctk.CTkLabel(
+            dialog,
+            text="Select how you want to import the passwords:",
+            font=("Arial", 12)
+        )
+        desc_label.pack(pady=(0, 20))
+
+        # Option 1: Merge (skip duplicates)
+        option1_frame = ctk.CTkFrame(dialog)
+        option1_frame.pack(fill="x", padx=20, pady=5)
+
+        option1_btn = ctk.CTkButton(
+            option1_frame,
+            text="✅ Merge (Skip Duplicates)",
+            font=("Arial", 12, "bold"),
+            fg_color="#2B7A0B",
+            hover_color="#3D9B1A",
+            height=50,
+            command=lambda: [selected_mode.__setitem__(0, "merge"), dialog.destroy()]
+        )
+        option1_btn.pack(fill="x", padx=10, pady=10)
+
+        option1_desc = ctk.CTkLabel(
+            option1_frame,
+            text="Keeps existing passwords, adds new ones. Skips duplicates.\nSafe - No data loss. Recommended.",
+            font=("Arial", 10),
+            text_color="gray"
+        )
+        option1_desc.pack(padx=10, pady=(0, 10))
+
+        # Option 2: Add all as new
+        option2_frame = ctk.CTkFrame(dialog)
+        option2_frame.pack(fill="x", padx=20, pady=5)
+
+        option2_btn = ctk.CTkButton(
+            option2_frame,
+            text="➕ Add All (Allow Duplicates)",
+            font=("Arial", 12, "bold"),
+            fg_color="#1F538D",
+            hover_color="#2E6BA8",
+            height=50,
+            command=lambda: [selected_mode.__setitem__(0, "add_all"), dialog.destroy()]
+        )
+        option2_btn.pack(fill="x", padx=10, pady=10)
+
+        option2_desc = ctk.CTkLabel(
+            option2_frame,
+            text="Adds all passwords as new entries, even if duplicates exist.\nUse when you want to keep multiple copies.",
+            font=("Arial", 10),
+            text_color="gray"
+        )
+        option2_desc.pack(padx=10, pady=(0, 10))
+
+        # Option 3: Replace all
+        option3_frame = ctk.CTkFrame(dialog)
+        option3_frame.pack(fill="x", padx=20, pady=5)
+
+        option3_btn = ctk.CTkButton(
+            option3_frame,
+            text="🔄 Replace All",
+            font=("Arial", 12, "bold"),
+            fg_color="#8B0000",
+            hover_color="#A52A2A",
+            height=50,
+            command=lambda: [selected_mode.__setitem__(0, "replace"), dialog.destroy()]
+        )
+        option3_btn.pack(fill="x", padx=10, pady=10)
+
+        option3_desc = ctk.CTkLabel(
+            option3_frame,
+            text="⚠️ DELETES all existing passwords first, then imports.\nDangerous - Use with caution!",
+            font=("Arial", 10),
+            text_color="#FF6B6B"
+        )
+        option3_desc.pack(padx=10, pady=(0, 10))
+
+        # Cancel button
+        cancel_btn = ctk.CTkButton(
+            dialog,
+            text="Cancel",
+            fg_color="gray",
+            command=dialog.destroy,
+            width=100
+        )
+        cancel_btn.pack(pady=10)
+
+        # Wait for dialog to close
+        self.wait_window(dialog)
+
+        return selected_mode[0]
+
+    def _import_data_background(self, filename: str, master_password: str, import_mode: str):
         """Import data in background thread"""
         try:
             results = self.backup_manager.import_encrypted_data(
-                self.user_id, master_password, filename, merge_mode
+                self.user_id, master_password, filename, import_mode
             )
             self.after(0, self._on_import_completed, results)
         except Exception as e:
@@ -777,32 +891,36 @@ class BackupManagerDialog(ctk.CTkToplevel):
             self.import_csv_btn.configure(state="disabled")
 
     def _import_browser_passwords(self):
-        """Import passwords from browser CSV"""
+        """Import passwords from browser CSV using mapping dialog"""
         # Check if file is selected
         if not self.selected_csv_file:
             messagebox.showwarning("No File Selected", "Please select a CSV file first.")
             return
 
-        # Get master password
-        master_password = simpledialog.askstring(
-            "Master Password",
-            "Enter your master password to encrypt imported passwords:",
-            show='*'
-        )
+        # Import CSVImportDialog here to avoid circular imports
+        from ..main_window import CSVImportDialog
 
-        if not master_password:
-            return
+        try:
+            # Open CSV import dialog with column mapping and selection
+            CSVImportDialog(
+                parent=self,
+                session_id=self.session_id,
+                password_manager=self.password_manager,
+                csv_file_path=self.selected_csv_file,
+                on_success=self._on_browser_import_success,
+                auth_manager=self.auth_manager,
+                username=self.username
+            )
+        except Exception as e:
+            logger.error(f"Failed to open CSV import dialog: {e}")
+            messagebox.showerror("Import Error", f"Failed to open import dialog:\n{str(e)}", parent=self)
 
-        browser_type = self.browser_type_var.get()
-
-        self._start_loading(f"Importing {browser_type} passwords...")
-
-        # Run import in background
-        threading.Thread(
-            target=self._import_browser_background,
-            args=(self.selected_csv_file, master_password, browser_type),
-            daemon=True
-        ).start()
+    def _on_browser_import_success(self):
+        """Handle successful browser import"""
+        # Reset the CSV import UI
+        self._reset_csv_import_ui()
+        self._show_success("Browser passwords imported successfully")
+        logger.info("Browser CSV import completed successfully")
     
     def _import_browser_background(self, filename: str, master_password: str, browser_type: str):
         """Import browser passwords in background thread"""

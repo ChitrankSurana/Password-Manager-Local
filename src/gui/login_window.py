@@ -25,7 +25,7 @@ Security Features:
 - Input validation and sanitization
 
 Author: Personal Password Manager
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import customtkinter as ctk
@@ -581,11 +581,30 @@ class LoginWindow(ctk.CTkToplevel):
                     self._save_user_preferences()
     
     def _set_initial_focus(self):
-        """Set initial focus to appropriate field"""
-        if self.username_var.get():
-            self.password_entry.focus()
-        else:
-            self.username_entry.focus()
+        """
+        Set initial focus to appropriate field
+
+        Logic:
+        - If username is filled (remembered from last login) → focus on password field
+        - If username is empty (first time or not remembered) → focus on username field
+
+        This ensures the cursor is always on the first empty field that needs input.
+        """
+        # Use after() to ensure widgets are fully initialized before setting focus
+        def set_focus():
+            username = self.username_var.get().strip()
+
+            if username:
+                # Username is filled, focus on password field
+                self.password_entry.focus_set()
+                logger.debug(f"Set focus to password field (username already filled: '{username}')")
+            else:
+                # Username is empty, focus on username field
+                self.username_entry.focus_set()
+                logger.debug("Set focus to username field (empty username)")
+
+        # Delay focus setting by 100ms to ensure window is fully rendered
+        self.after(100, set_focus)
     
     def _load_user_preferences(self) -> Dict[str, Any]:
         """Load user preferences from file"""

@@ -91,10 +91,10 @@ class DatabaseMigrationManager:
         """Register all available migrations"""
         # Migration from version 1 to version 2: Add user settings and audit logging
         self._migrations[2] = self._migrate_to_version_2
-        
-        # Future migrations can be added here
-        # self._migrations[3] = self._migrate_to_version_3
-        
+
+        # Migration from version 2 to version 3: Add entry_name field to passwords table
+        self._migrations[3] = self._migrate_to_version_3
+
         logger.info(f"Registered {len(self._migrations)} migrations")
     
     @contextmanager
@@ -513,7 +513,68 @@ class DatabaseMigrationManager:
         }),))
         
         logger.info("Migration to version 2 completed successfully")
-    
+
+    def _migrate_to_version_3(self, conn: sqlite3.Connection):
+        """
+        Migration from version 2 to version 3: Add entry_name field to passwords table
+
+        This migration adds:
+        1. entry_name column to passwords table for custom entry names/labels
+        2. Index for better search performance on entry names
+
+        Args:
+            conn (sqlite3.Connection): Database connection (within transaction)
+        """
+        cursor = conn.cursor()
+
+        logger.info("Starting migration to version 3: Adding entry_name field to passwords table")
+
+        # 1. Add entry_name column to passwords table
+        try:
+            cursor.execute("""
+                ALTER TABLE passwords ADD COLUMN entry_name TEXT DEFAULT NULL
+            """)
+            logger.info("Added entry_name column to passwords table")
+        except sqlite3.OperationalError as e:
+            # Column might already exist (e.g., if migration was partially completed before)
+            if "duplicate column" in str(e).lower():
+                logger.warning("entry_name column already exists, skipping column addition")
+            else:
+                raise
+
+        # 2. Create index for entry_name for better search performance
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_passwords_entry_name
+            ON passwords(entry_name)
+        """)
+        logger.info("Created index on entry_name column")
+
+        # 3. Add migration audit log entry (if table exists)
+        try:
+            cursor.execute("""
+                INSERT INTO security_audit_log
+                (user_id, session_id, action_type, action_result, action_details,
+                 security_level, client_version, request_source)
+                VALUES (0, 'SYSTEM_MIGRATION', 'DATABASE_MIGRATION', 'SUCCESS',
+                        ?, 'HIGH', '3.0.0', 'MIGRATION_SYSTEM')
+            """, (json.dumps({
+                'migration_version': 3,
+                'migration_type': 'SCHEMA_UPDATE',
+                'tables_modified': ['passwords'],
+                'columns_added': ['entry_name'],
+                'indexes_added': ['idx_passwords_entry_name'],
+                'description': 'Added entry_name field for custom password entry labels'
+            }),))
+            logger.info("Added migration audit log entry")
+        except sqlite3.OperationalError as e:
+            # Audit log table might not exist in older database versions
+            if "no such table" in str(e).lower():
+                logger.warning("security_audit_log table does not exist, skipping audit log entry")
+            else:
+                raise
+
+        logger.info("Migration to version 3 completed successfully")
+
     def cleanup_old_backups(self, keep_days: int = 30):
         """
         Clean up backup files older than specified days

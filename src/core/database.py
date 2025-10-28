@@ -23,7 +23,7 @@ Security Features:
 - Automatic database backup on schema changes
 
 Author: Personal Password Manager
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import sqlite3
@@ -75,7 +75,7 @@ class DatabaseManager:
     """
     
     # Database schema version for migrations
-    SCHEMA_VERSION = 2  # Updated for user settings and audit logging
+    SCHEMA_VERSION = 3  # Updated for entry_name field in passwords table
     
     # Security settings
     MAX_FAILED_ATTEMPTS = 5  # Lock account after 5 failed attempts
@@ -233,6 +233,7 @@ class DatabaseManager:
                     CREATE TABLE IF NOT EXISTS passwords (
                         entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
                         user_id INTEGER NOT NULL,
+                        entry_name TEXT DEFAULT NULL,
                         website TEXT NOT NULL,
                         username TEXT NOT NULL,
                         password_encrypted BLOB NOT NULL,
@@ -490,21 +491,22 @@ class DatabaseManager:
             logger.error(f"Authentication error for user '{username}': {e}")
             raise DatabaseError(f"Authentication failed: {e}")
     
-    def add_password_entry(self, user_id: int, website: str, username: str, 
-                          encrypted_password: bytes, remarks: str = "") -> int:
+    def add_password_entry(self, user_id: int, website: str, username: str,
+                          encrypted_password: bytes, remarks: str = "", entry_name: str = None) -> int:
         """
         Add a new password entry for a user
-        
+
         Args:
             user_id (int): ID of the user owning this password
             website (str): Website or service name
             username (str): Username for the service
             encrypted_password (bytes): AES-256 encrypted password
             remarks (str): Optional remarks/notes
-            
+            entry_name (str): Optional custom name/label for the entry
+
         Returns:
             int: Entry ID of the created password entry
-            
+
         Raises:
             DatabaseError: If entry creation fails
             ValueError: If required parameters are invalid
@@ -512,27 +514,30 @@ class DatabaseManager:
         # Validate input parameters
         if not website or not website.strip():
             raise ValueError("Website cannot be empty")
-        
+
         if not username or not username.strip():
             raise ValueError("Username cannot be empty")
-        
+
         if not encrypted_password:
             raise ValueError("Encrypted password cannot be empty")
-        
+
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 # Verify user exists
                 cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
                 if not cursor.fetchone():
                     raise ValueError(f"User ID {user_id} does not exist")
-                
+
+                # Prepare entry_name (strip if provided, otherwise NULL)
+                prepared_entry_name = entry_name.strip() if entry_name and entry_name.strip() else None
+
                 # Insert password entry
                 cursor.execute("""
-                    INSERT INTO passwords (user_id, website, username, password_encrypted, remarks)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (user_id, website.strip(), username.strip(), encrypted_password, remarks.strip()))
+                    INSERT INTO passwords (user_id, entry_name, website, username, password_encrypted, remarks)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (user_id, prepared_entry_name, website.strip(), username.strip(), encrypted_password, remarks.strip()))
                 
                 entry_id = cursor.lastrowid
                 conn.commit()
@@ -565,20 +570,23 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 
                 if website:
-                    # Search for specific website (case-insensitive partial match)
+                    # Search for specific website or entry name (case-insensitive partial match)
                     cursor.execute("""
-                        SELECT entry_id, website, username, password_encrypted, remarks,
+                        SELECT entry_id, entry_name, website, username, password_encrypted, remarks,
                                created_at, modified_at, is_favorite
-                        FROM passwords 
-                        WHERE user_id = ? AND LOWER(website) LIKE LOWER(?)
+                        FROM passwords
+                        WHERE user_id = ? AND (
+                            LOWER(website) LIKE LOWER(?) OR
+                            LOWER(entry_name) LIKE LOWER(?)
+                        )
                         ORDER BY website, username
-                    """, (user_id, f"%{website.strip()}%"))
+                    """, (user_id, f"%{website.strip()}%", f"%{website.strip()}%"))
                 else:
                     # Get all entries for user
                     cursor.execute("""
-                        SELECT entry_id, website, username, password_encrypted, remarks,
+                        SELECT entry_id, entry_name, website, username, password_encrypted, remarks,
                                created_at, modified_at, is_favorite
-                        FROM passwords 
+                        FROM passwords
                         WHERE user_id = ?
                         ORDER BY website, username
                     """, (user_id,))
@@ -597,10 +605,10 @@ class DatabaseManager:
     
     def update_password_entry(self, entry_id: int, user_id: int, website: str = None,
                              username: str = None, encrypted_password: bytes = None,
-                             remarks: str = None, is_favorite: bool = None) -> bool:
+                             remarks: str = None, is_favorite: bool = None, entry_name: str = None) -> bool:
         """
         Update an existing password entry
-        
+
         Args:
             entry_id (int): ID of the entry to update
             user_id (int): ID of the user (for security verification)
@@ -609,53 +617,60 @@ class DatabaseManager:
             encrypted_password (bytes, optional): New encrypted password
             remarks (str, optional): New remarks
             is_favorite (bool, optional): Favorite status
-            
+            entry_name (str, optional): New custom name/label
+
         Returns:
             bool: True if update was successful, False if entry not found
-            
+
         Raises:
             DatabaseError: If update fails
             ValueError: If user doesn't own the entry
         """
-        if not any([website, username, encrypted_password, remarks is not None, is_favorite is not None]):
+        if not any([website, username, encrypted_password, remarks is not None, is_favorite is not None, entry_name is not None]):
             return True  # No updates requested
-        
+
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 # Verify entry exists and belongs to user
                 cursor.execute("""
                     SELECT user_id FROM passwords WHERE entry_id = ?
                 """, (entry_id,))
-                
+
                 result = cursor.fetchone()
                 if not result:
                     return False
-                
+
                 if result['user_id'] != user_id:
                     raise ValueError("User does not own this password entry")
-                
+
                 # Build dynamic update query
                 update_fields = []
                 update_values = []
-                
+
+                if entry_name is not None:
+                    update_fields.append("entry_name = ?")
+                    # Allow empty string to clear the name, otherwise strip
+                    prepared_name = entry_name.strip() if entry_name.strip() else None
+                    update_values.append(prepared_name)
+
                 if website is not None:
                     update_fields.append("website = ?")
                     update_values.append(website.strip())
-                
+
                 if username is not None:
                     update_fields.append("username = ?")
                     update_values.append(username.strip())
-                
+
                 if encrypted_password is not None:
                     update_fields.append("password_encrypted = ?")
                     update_values.append(encrypted_password)
-                
+
                 if remarks is not None:
                     update_fields.append("remarks = ?")
                     update_values.append(remarks.strip())
-                
+
                 if is_favorite is not None:
                     update_fields.append("is_favorite = ?")
                     update_values.append(is_favorite)

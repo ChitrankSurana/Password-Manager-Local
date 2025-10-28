@@ -27,7 +27,7 @@ Security Features:
 - Memory clearing for sensitive data
 
 Author: Personal Password Manager
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import logging
@@ -76,14 +76,15 @@ class PasswordCacheMode(Enum):
 class PasswordEntry:
     """
     Represents a password entry with metadata
-    
+
     This dataclass provides a structured representation of password entries
     with all necessary metadata for display and management purposes.
     """
     entry_id: int
-    website: str
-    username: str
-    password: str = field(repr=False)  # Don't print password in logs
+    entry_name: Optional[str] = None  # Custom name/label for the entry
+    website: str = ""
+    username: str = ""
+    password: str = field(default="", repr=False)  # Don't print password in logs
     remarks: str = ""
     created_at: datetime = None
     modified_at: datetime = None
@@ -166,10 +167,10 @@ class PasswordManagerCore:
     
     def add_password_entry(self, session_id: str, website: str, username: str,
                           password: str, master_password: str = None, remarks: str = "",
-                          is_favorite: bool = False, tags: List[str] = None) -> int:
+                          is_favorite: bool = False, tags: List[str] = None, entry_name: str = None) -> int:
         """
         Add a new password entry with encryption
-        
+
         Args:
             session_id (str): Valid session token
             website (str): Website or service name
@@ -179,10 +180,11 @@ class PasswordManagerCore:
             remarks (str, optional): User notes about the entry
             is_favorite (bool, optional): Mark as favorite
             tags (List[str], optional): Tags for organization
-            
+            entry_name (str, optional): Custom name/label for the entry
+
         Returns:
             int: ID of the created password entry
-            
+
         Raises:
             InvalidSessionError: If session is invalid
             MasterPasswordRequiredError: If master password is invalid
@@ -192,34 +194,35 @@ class PasswordManagerCore:
         try:
             # Validate session
             session = self.auth_manager.validate_session(session_id)
-            
+
             # Validate input data
             self._validate_password_entry_data(website, username, password)
-            
+
             # Get master password from cache if not provided
             if master_password is None:
                 master_password = self._get_cached_master_password(session_id)
                 if master_password is None:
                     raise MasterPasswordRequiredError("Master password required for encryption. Please provide master password.")
-            
+
             # Verify master password
             if not self._verify_master_password(session_id, master_password):
                 raise MasterPasswordRequiredError("Invalid master password")
-            
+
             # Check for duplicate entries
             if self._check_duplicate_entry(session.user_id, website, username):
                 raise DuplicateEntryError(f"Entry already exists for {website} - {username}")
-            
+
             # Encrypt password
             encrypted_password = session.encryption_system.encrypt_password(password, master_password)
-            
+
             # Add to database
             entry_id = self.auth_manager.db_manager.add_password_entry(
                 user_id=session.user_id,
                 website=website.strip(),
                 username=username.strip(),
                 encrypted_password=encrypted_password,
-                remarks=remarks.strip()
+                remarks=remarks.strip(),
+                entry_name=entry_name
             )
             
             # Update favorite status if needed
@@ -300,6 +303,7 @@ class PasswordManagerCore:
             # Create PasswordEntry object
             entry = PasswordEntry(
                 entry_id=target_entry['entry_id'],
+                entry_name=target_entry.get('entry_name'),
                 website=target_entry['website'],
                 username=target_entry['username'],
                 password=decrypted_password,
@@ -391,6 +395,7 @@ class PasswordManagerCore:
                 # Create PasswordEntry object
                 entry = PasswordEntry(
                     entry_id=db_entry['entry_id'],
+                    entry_name=db_entry.get('entry_name'),
                     website=db_entry['website'],
                     username=db_entry['username'],
                     password=decrypted_password,
@@ -420,10 +425,10 @@ class PasswordManagerCore:
     
     def update_password_entry(self, session_id: str, entry_id: int, website: str = None,
                              username: str = None, password: str = None, master_password: str = None,
-                             remarks: str = None, is_favorite: bool = None) -> bool:
+                             remarks: str = None, is_favorite: bool = None, entry_name: str = None) -> bool:
         """
         Update an existing password entry
-        
+
         Args:
             session_id (str): Valid session token
             entry_id (int): ID of the entry to update
@@ -433,10 +438,11 @@ class PasswordManagerCore:
             master_password (str, optional): Master password for encryption
             remarks (str, optional): New remarks
             is_favorite (bool, optional): New favorite status
-            
+            entry_name (str, optional): New custom name/label
+
         Returns:
             bool: True if update was successful
-            
+
         Raises:
             InvalidSessionError: If session is invalid
             MasterPasswordRequiredError: If master password needed but not provided
@@ -445,19 +451,22 @@ class PasswordManagerCore:
         try:
             # Validate session
             session = self.auth_manager.validate_session(session_id)
-            
+
             # Prepare update parameters
             update_params = {}
-            
+
+            if entry_name is not None:
+                update_params['entry_name'] = entry_name
+
             if website is not None:
                 update_params['website'] = website.strip()
-            
+
             if username is not None:
                 update_params['username'] = username.strip()
-            
+
             if remarks is not None:
                 update_params['remarks'] = remarks.strip()
-            
+
             if is_favorite is not None:
                 update_params['is_favorite'] = is_favorite
             

@@ -31,7 +31,7 @@ Security Note:
     Database files are stored locally for maximum security.
 
 Author: Personal Password Manager
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import sys
@@ -46,8 +46,8 @@ def print_banner():
     """Print application banner and basic information"""
     banner = """
     ==============================================================
-                   Personal Password Manager                     
-                        Version 1.0.0                          
+                   Personal Password Manager
+                        Version 2.0.0                          
                                                                   
     A secure, local password manager with modern GUI and       
     web interfaces, featuring strong encryption and backup     

@@ -7,7 +7,7 @@ This module provides an interactive password generation dialog with real-time
 customization options, strength analysis, and multiple generation methods.
 
 Author: Personal Password Manager
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import customtkinter as ctk

@@ -25,7 +25,7 @@ Security Features:
 - Memory-safe password operations
 
 Author: Personal Password Manager
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import json
@@ -293,7 +293,7 @@ class BackupManager:
             raise ExportError(f"Failed to export data: {e}")
     
     def import_encrypted_data(self, user_id: int, master_password: str,
-                             import_file_path: str, merge_mode: bool = True) -> Dict[str, Any]:
+                             import_file_path: str, import_mode: str = "merge") -> Dict[str, Any]:
         """
         Import data from encrypted export file
 
@@ -301,7 +301,7 @@ class BackupManager:
             user_id (int): User ID
             master_password (str): Master password for decryption
             import_file_path (str): Path to encrypted import file
-            merge_mode (bool): True to merge, False to replace
+            import_mode (str): Import mode - "merge" (skip duplicates), "add_all" (allow duplicates), "replace" (delete all first)
 
         Returns:
             Dict[str, Any]: Import results summary
@@ -323,17 +323,17 @@ class BackupManager:
 
                 # Import data
                 results = self._import_password_entries(
-                    user_id, import_data, master_password, merge_mode
+                    user_id, import_data, master_password, import_mode
                 )
-                
+
                 logger.info(f"Data imported successfully: {results}")
                 return results
-                
+
             finally:
                 # Clean up decrypted file
                 if os.path.exists(decrypted_path):
                     os.remove(decrypted_path)
-                    
+
         except Exception as e:
             logger.error(f"Data import failed: {e}")
             raise ImportError(f"Failed to import data: {e}")
@@ -370,6 +370,7 @@ class BackupManager:
                     )
 
                     entry_data = {
+                        'entry_name': entry.get('entry_name', ''),
                         'website': entry['website'],
                         'username': entry['username'],
                         'password': decrypted_password,
@@ -389,7 +390,7 @@ class BackupManager:
             # Write to CSV
             output_path = Path(output_path)
             with open(output_path, 'w', newline='', encoding='utf-8') as f:
-                fieldnames = ['website', 'username', 'password', 'remarks', 'is_favorite', 'created_at', 'modified_at']
+                fieldnames = ['entry_name', 'website', 'username', 'password', 'remarks', 'is_favorite', 'created_at', 'modified_at']
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
 
                 writer.writeheader()
@@ -498,17 +499,17 @@ class BackupManager:
     def _export_csv(self, entries: List[Dict], username: str, timestamp: str) -> str:
         """Export entries to CSV format"""
         export_path = self.export_dir / f"{username}_export_{timestamp}.csv"
-        
+
         with open(export_path, 'w', newline='', encoding='utf-8') as f:
-            fieldnames = ['website', 'username', 'password', 'remarks', 'is_favorite']
+            fieldnames = ['entry_name', 'website', 'username', 'password', 'remarks', 'is_favorite']
             writer = csv.DictWriter(f, fieldnames=fieldnames)
-            
+
             writer.writeheader()
             for entry in entries:
                 # Only write fields that exist in fieldnames
                 filtered_entry = {k: v for k, v in entry.items() if k in fieldnames}
                 writer.writerow(filtered_entry)
-        
+
         return str(export_path)
     
     def _export_xml(self, entries: List[Dict], username: str, timestamp: str) -> str:
@@ -564,46 +565,64 @@ class BackupManager:
         """Decrypt import file with master password"""
         with open(import_path, 'rb') as f:
             encrypted_data = f.read()
-        
+
         try:
             # Decrypt data
             decrypted_b64 = self.encryption.decrypt_password(encrypted_data, master_password)
-            
+
             # Decode and decompress
             compressed_data = base64.b64decode(decrypted_b64)
             file_data = gzip.decompress(compressed_data)
-            
-            # Save decrypted file temporarily
-            decrypted_path = str(import_path) + '.decrypted'
+
+            # Determine original file format from encrypted filename
+            # e.g., "file.csv.encrypted" -> "file.csv"
+            original_filename = str(import_path)
+            if original_filename.endswith('.encrypted'):
+                original_filename = original_filename[:-10]  # Remove ".encrypted"
+
+            # Save decrypted file temporarily with correct extension
+            decrypted_path = original_filename + '.decrypted'
             with open(decrypted_path, 'wb') as f:
                 f.write(file_data)
-            
+
             return decrypted_path
-            
+
         except Exception as e:
             raise ImportError(f"Failed to decrypt import file: {e}")
     
     def _load_import_data(self, file_path: str) -> List[Dict]:
         """Load and validate import data"""
         file_path = Path(file_path)
-        
-        if file_path.suffix.lower() == '.json':
+
+        # Determine file format - check for original extension before .decrypted
+        # e.g., "file.csv.decrypted" -> format is CSV
+        filename_str = str(file_path)
+        file_format = None
+
+        if filename_str.endswith('.decrypted'):
+            # Remove .decrypted and get the actual format
+            original_name = filename_str[:-10]  # Remove ".decrypted"
+            file_format = Path(original_name).suffix.lower()
+        else:
+            file_format = file_path.suffix.lower()
+
+        if file_format == '.json':
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 return data.get('entries', [])
-        
-        elif file_path.suffix.lower() == '.csv':
+
+        elif file_format == '.csv':
             entries = []
             with open(file_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     entries.append(dict(row))
             return entries
-        
-        elif file_path.suffix.lower() == '.xml':
+
+        elif file_format == '.xml':
             tree = ET.parse(file_path)
             root = tree.getroot()
-            
+
             entries = []
             for entry_elem in root.findall('.//Entry'):
                 entry = {}
@@ -611,52 +630,75 @@ class BackupManager:
                     entry[child.tag] = child.text
                 entries.append(entry)
             return entries
-        
+
         else:
-            raise ImportError(f"Unsupported import format: {file_path.suffix}")
+            raise ImportError(f"Unsupported import format: {file_format}")
     
-    def _import_password_entries(self, user_id: int, entries: List[Dict], 
-                                master_password: str, merge_mode: bool) -> Dict[str, Any]:
-        """Import password entries into database"""
+    def _import_password_entries(self, user_id: int, entries: List[Dict],
+                                master_password: str, import_mode: str = "merge") -> Dict[str, Any]:
+        """
+        Import password entries into database
+
+        Args:
+            user_id: User ID
+            entries: List of password entries to import
+            master_password: Master password for encryption
+            import_mode: Import mode - "merge", "add_all", or "replace"
+        """
         imported_count = 0
         skipped_count = 0
         error_count = 0
         errors = []
-        
+
+        # If replace mode, delete all existing passwords first
+        if import_mode == "replace":
+            try:
+                existing = self.db_manager.get_password_entries(user_id)
+                for existing_entry in existing:
+                    self.db_manager.delete_password_entry(user_id, existing_entry['entry_id'])
+                logger.info(f"Deleted {len(existing)} existing passwords for replace mode")
+            except Exception as e:
+                logger.error(f"Failed to delete existing passwords: {e}")
+                raise ImportError(f"Failed to clear existing data for replace mode: {e}")
+
         for entry in entries:
             try:
                 # Validate required fields
                 if not entry.get('website') or not entry.get('username'):
                     skipped_count += 1
                     continue
-                
-                # Check for duplicates if in merge mode
-                if merge_mode:
+
+                # Check for duplicates if in merge mode (skip duplicates)
+                if import_mode == "merge":
                     existing_entries = self.db_manager.get_password_entries(
                         user_id, website=entry['website']
                     )
-                    
+
                     duplicate_found = any(
                         existing['username'].lower() == entry['username'].lower()
                         for existing in existing_entries
                     )
-                    
+
                     if duplicate_found:
                         skipped_count += 1
                         continue
-                
+
+                # For "add_all" mode, no duplicate checking - just add everything
+                # For "replace" mode, all old data is already deleted, so add everything
+
                 # Encrypt password
                 encrypted_password = self.encryption.encrypt_password(
                     entry.get('password', ''), master_password
                 )
-                
+
                 # Add entry to database
                 self.db_manager.add_password_entry(
                     user_id=user_id,
                     website=entry['website'],
                     username=entry['username'],
                     encrypted_password=encrypted_password,
-                    remarks=entry.get('remarks', '')
+                    remarks=entry.get('remarks', ''),
+                    entry_name=entry.get('entry_name')
                 )
                 
                 imported_count += 1
@@ -677,40 +719,47 @@ class BackupManager:
     def _parse_browser_csv(self, csv_path: Path, browser_type: str) -> List[Dict]:
         """Parse browser CSV export file"""
         entries = []
-        
+
         # Browser-specific column mappings
         column_mapping = {
             'chrome': {
                 'name': 'website',
-                'url': 'website', 
+                'url': 'website',
                 'username': 'username',
-                'password': 'password'
+                'password': 'password',
+                'title': 'entry_name',
+                'entry_name': 'entry_name'
             },
             'firefox': {
                 'hostname': 'website',
                 'username': 'username',
-                'password': 'password'
+                'password': 'password',
+                'title': 'entry_name',
+                'entry_name': 'entry_name',
+                'name': 'entry_name'
             },
             'edge': {
                 'name': 'website',
                 'url': 'website',
                 'username': 'username',
-                'password': 'password'
+                'password': 'password',
+                'title': 'entry_name',
+                'entry_name': 'entry_name'
             }
         }
-        
+
         mapping = column_mapping.get(browser_type.lower(), column_mapping['chrome'])
-        
+
         with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 entry = {}
-                
+
                 # Map browser columns to our format
                 for browser_col, our_col in mapping.items():
                     if browser_col in row:
                         entry[our_col] = row[browser_col]
-                
+
                 # Extract domain from URL if needed
                 if 'url' in row and entry.get('website'):
                     try:
@@ -719,10 +768,10 @@ class BackupManager:
                         entry['website'] = parsed.netloc or parsed.path
                     except:
                         pass
-                
+
                 if entry.get('website') and entry.get('username'):
                     entries.append(entry)
-        
+
         return entries
     
     def get_backup_list(self) -> List[Dict[str, Any]]:

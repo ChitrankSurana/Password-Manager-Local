@@ -25,7 +25,7 @@ Security Features:
 - Memory-safe password operations
 
 Author: Personal Password Manager
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import customtkinter as ctk
@@ -285,20 +285,44 @@ class PasswordEntryWidget(ctk.CTkFrame):
         # Header frame (always visible)
         header_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
         header_frame.pack(fill="x")
-        
-        # Website/service name
-        website_label = create_themed_label(
-            header_frame,
-            text=self.entry.website,
-            style="label"
-        )
-        website_label.configure(font=fonts["body_large"])
-        website_label.pack(side="left", anchor="w")
-        
+
+        # Left side - Name/Website and Favorite
+        left_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        left_frame.pack(side="left", fill="x", expand=True)
+
+        # Display name if available, otherwise website
+        if self.entry.entry_name:
+            # Custom name as primary heading
+            name_label = create_themed_label(
+                left_frame,
+                text=self.entry.entry_name,
+                style="label"
+            )
+            name_label.configure(font=fonts["body_large"])
+            name_label.pack(side="top", anchor="w")
+
+            # Website as secondary info below name
+            website_sublabel = create_themed_label(
+                left_frame,
+                text=f"📧 {self.entry.website}",
+                style="label_secondary"
+            )
+            website_sublabel.configure(font=fonts["body_small"])
+            website_sublabel.pack(side="top", anchor="w")
+        else:
+            # No custom name - show website as heading (legacy behavior)
+            website_label = create_themed_label(
+                left_frame,
+                text=self.entry.website,
+                style="label"
+            )
+            website_label.configure(font=fonts["body_large"])
+            website_label.pack(side="top", anchor="w")
+
         # Favorite indicator
         if self.entry.is_favorite:
             favorite_label = create_themed_label(
-                header_frame,
+                left_frame,
                 text="⭐",
                 style="label"
             )
@@ -905,7 +929,7 @@ class MainWindow(ctk.CTkToplevel):
         self.title(f"Personal Password Manager - {self.username}")
         self.geometry("1200x800")
         self.minsize(900, 600)
-        
+
         # Center window
         self.update_idletasks()
         width = self.winfo_width()
@@ -913,10 +937,19 @@ class MainWindow(ctk.CTkToplevel):
         x = (self.winfo_screenwidth() // 2) - (width // 2)
         y = (self.winfo_screenheight() // 2) - (height // 2)
         self.geometry(f"{width}x{height}+{x}+{y}")
-        
+
+        # Maximize window
+        try:
+            self.state('zoomed')  # Windows/Linux
+        except:
+            try:
+                self.attributes('-zoomed', True)  # Alternative for some Linux systems
+            except:
+                pass  # If maximizing fails, just use the centered geometry
+
         # Apply theme
         apply_window_theme(self)
-        
+
         # Protocol handlers
         self.protocol("WM_DELETE_WINDOW", self._on_window_close)
         
@@ -1424,23 +1457,34 @@ class AddPasswordDialog(ctk.CTkToplevel):
         self.geometry(f"400x450+{x}+{y}")
         
         # Variables
+        self.entry_name_var = ctk.StringVar()
         self.website_var = ctk.StringVar()
         self.username_var = ctk.StringVar()
         self.password_var = ctk.StringVar()
         self.remarks_var = ctk.StringVar()
-        
+
         self._create_ui()
-    
+
     def _create_ui(self):
         """Create dialog UI"""
         # Main container with scrollable frame
         main_frame = ctk.CTkScrollableFrame(self)
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
-        
+
         # Title
         title_label = ctk.CTkLabel(main_frame, text="Add New Password", font=("Arial", 18, "bold"))
         title_label.pack(pady=(0, 20))
-        
+
+        # Name field (optional)
+        ctk.CTkLabel(main_frame, text="Name (Optional):", anchor="w").pack(fill="x", pady=(0, 5))
+        self.entry_name_entry = ctk.CTkEntry(main_frame, textvariable=self.entry_name_var, placeholder_text="e.g., Work Email, My Bank, Netflix...")
+        self.entry_name_entry.pack(fill="x", pady=(0, 5))
+
+        # Help text for name field
+        help_label = ctk.CTkLabel(main_frame, text="💡 Give this entry a friendly name",
+                                 anchor="w", font=("Arial", 10), text_color="gray")
+        help_label.pack(fill="x", pady=(0, 15))
+
         # Website field
         ctk.CTkLabel(main_frame, text="Website:", anchor="w").pack(fill="x", pady=(0, 5))
         self.website_entry = ctk.CTkEntry(main_frame, textvariable=self.website_var, placeholder_text="e.g., google.com")
@@ -1483,9 +1527,9 @@ class AddPasswordDialog(ctk.CTkToplevel):
         self.add_btn = ctk.CTkButton(button_frame, text="Add Password", command=self._add_password)
         self.add_btn.pack(side="right")
         ToolTip(self.add_btn, "Save this password entry")
-        
+
         # Focus on first field
-        self.website_entry.focus()
+        self.entry_name_entry.focus()
     
     def _generate_password(self):
         """Generate a random password"""
@@ -1499,37 +1543,39 @@ class AddPasswordDialog(ctk.CTkToplevel):
     
     def _add_password(self):
         """Add the password entry"""
+        entry_name = self.entry_name_var.get().strip() or None  # Convert empty to None
         website = self.website_var.get().strip()
         username = self.username_var.get().strip()
         password = self.password_var.get()
         remarks = self.remarks_var.get().strip()
-        
+
         # Validate input
         if not website:
             self.status_label.configure(text="Please enter a website")
             self.website_entry.focus()
             return
-        
+
         if not username:
             self.status_label.configure(text="Please enter a username")
             self.username_entry.focus()
             return
-        
+
         if not password:
             self.status_label.configure(text="Please enter a password")
             self.password_entry.focus()
             return
-        
+
         try:
             self.add_btn.configure(state="disabled", text="Adding...")
-            
+
             # Add password entry (using session, no master password needed)
             entry_id = self.password_manager.add_password_entry(
                 session_id=self.session_id,
                 website=website,
                 username=username,
                 password=password,
-                remarks=remarks
+                remarks=remarks,
+                entry_name=entry_name
             )
             
             # Success
@@ -1929,6 +1975,7 @@ class EditPasswordDialog(ctk.CTkToplevel):
         # Initialize StringVar and BooleanVar for form fields
         # These are bound to UI widgets for automatic updates
 
+        self.entry_name_var = ctk.StringVar()
         self.website_var = ctk.StringVar()
         self.username_var = ctk.StringVar()
         self.password_var = ctk.StringVar()
@@ -1985,6 +2032,37 @@ class EditPasswordDialog(ctk.CTkToplevel):
             font=("Arial", 20, "bold")
         )
         title_label.pack(pady=(0, 20))
+
+        # ====================================================================
+        # Name Field (Optional)
+        # ====================================================================
+        # Custom friendly name for this password entry
+
+        ctk.CTkLabel(
+            main_frame,
+            text="Name (Optional):",
+            anchor="w",
+            font=("Arial", 12, "bold")
+        ).pack(fill="x", pady=(0, 5))
+
+        self.entry_name_entry = ctk.CTkEntry(
+            main_frame,
+            textvariable=self.entry_name_var,
+            placeholder_text="e.g., Work Email, My Bank, Netflix...",
+            height=35
+        )
+        self.entry_name_entry.pack(fill="x", pady=(0, 5))
+        ToolTip(self.entry_name_entry, "Give this entry a friendly name")
+
+        # Help text for name field
+        help_label = ctk.CTkLabel(
+            main_frame,
+            text="💡 Give this entry a friendly name that's easier to remember",
+            anchor="w",
+            font=("Arial", 10),
+            text_color="gray"
+        )
+        help_label.pack(fill="x", pady=(0, 15))
 
         # ====================================================================
         # Website Field
@@ -2256,6 +2334,7 @@ class EditPasswordDialog(ctk.CTkToplevel):
         master password to view the existing password.
         """
         # Set form field values from the entry object
+        self.entry_name_var.set(self.entry.entry_name or "")  # Set name if exists
         self.website_var.set(self.entry.website)
         self.username_var.set(self.entry.username)
 
@@ -2459,6 +2538,7 @@ class EditPasswordDialog(ctk.CTkToplevel):
         # Input Validation
         # ====================================================================
 
+        entry_name = self.entry_name_var.get().strip() or None  # Convert empty to None
         website = self.website_var.get().strip()
         username = self.username_var.get().strip()
         password = self.password_var.get()
@@ -2487,6 +2567,7 @@ class EditPasswordDialog(ctk.CTkToplevel):
         # Check if any fields were actually modified
 
         changes_made = (
+            entry_name != self.entry.entry_name or
             website != self.entry.website or
             username != self.entry.username or
             password != self.entry.password or
@@ -2514,6 +2595,7 @@ class EditPasswordDialog(ctk.CTkToplevel):
             success = self.password_manager.update_password_entry(
                 session_id=self.session_id,
                 entry_id=self.entry.entry_id,
+                entry_name=entry_name,
                 website=website,
                 username=username,
                 password=password,
@@ -2966,7 +3048,7 @@ class SettingsDialog(ctk.CTkToplevel):
         
         about_text = ctk.CTkLabel(
             about_frame,
-            text="Personal Password Manager v1.0.0\n"
+            text="Personal Password Manager v2.0.0\n"
                  "Secure local password storage with AES-256 encryption\n"
                  "PBKDF2 key derivation with 100,000+ iterations\n"
                  "Built with Python & CustomTkinter\n\n"
@@ -3188,7 +3270,7 @@ class CSVImportDialog(ctk.CTkToplevel):
 
         # Create mapping controls
         self.mapping_vars = {}
-        for field in ["Website", "Username", "Password", "Remarks"]:
+        for field in ["Name", "Website", "Username", "Password", "Remarks"]:
             field_frame = ctk.CTkFrame(mapping_frame, fg_color="transparent")
             field_frame.pack(fill="x", padx=15, pady=5)
 
@@ -3209,6 +3291,7 @@ class CSVImportDialog(ctk.CTkToplevel):
             for header in self.headers:
                 header_lower = header.lower()
                 if (field_lower in header_lower or
+                    (field_lower == "name" and any(x in header_lower for x in ["name", "title", "label", "entry_name"])) or
                     (field_lower == "website" and any(x in header_lower for x in ["url", "site", "domain"])) or
                     (field_lower == "username" and any(x in header_lower for x in ["user", "email", "login"])) or
                     (field_lower == "password" and "pass" in header_lower) or
@@ -3251,13 +3334,123 @@ class CSVImportDialog(ctk.CTkToplevel):
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         button_frame.pack(fill="x")
 
-        cancel_btn = ctk.CTkButton(button_frame, text="Cancel", command=self.destroy, fg_color="gray")
+        cancel_btn = ctk.CTkButton(button_frame, text="Cancel", command=self.destroy, fg_color="gray", width=100)
         cancel_btn.pack(side="right", padx=(10, 0))
         ToolTip(cancel_btn, "Cancel import and close dialog")
 
-        next_btn = ctk.CTkButton(button_frame, text="Next: Select Passwords →", command=self._go_to_selection_step)
-        next_btn.pack(side="right")
+        next_btn = ctk.CTkButton(button_frame, text="Next: Select Passwords →", command=self._go_to_selection_step, width=180)
+        next_btn.pack(side="right", padx=(10, 0))
         ToolTip(next_btn, "Proceed to select which passwords to import")
+
+        import_all_btn = ctk.CTkButton(button_frame, text="📥 Import All Passwords", command=self._import_all_passwords, fg_color="#2B7A0B", hover_color="#3D9B1A", width=180)
+        import_all_btn.pack(side="right")
+        ToolTip(import_all_btn, "Import all passwords from CSV immediately")
+
+    def _import_all_passwords(self):
+        """Validate mapping and import all passwords immediately"""
+        # Validate required fields are mapped
+        required_fields = ["website", "username", "password"]
+        missing_fields = []
+
+        for field in required_fields:
+            if self.mapping_vars[field].get() == "<Not mapped>":
+                missing_fields.append(field.title())
+
+        if missing_fields:
+            self.status_label.configure(text=f"⚠️ Please map required fields: {', '.join(missing_fields)}")
+            return
+
+        # Create column index mapping
+        self.column_map = {}
+        for field, var in self.mapping_vars.items():
+            header = var.get()
+            if header != "<Not mapped>" and header in self.headers:
+                self.column_map[field] = self.headers.index(header)
+
+        logger.info(f"Column mapping validated. Importing all {len(self.all_data)} passwords.")
+
+        # Prompt for master password
+        prompt = MasterPasswordPrompt(
+            self,
+            self.auth_manager,
+            self.session_id,
+            self.username,
+            max_attempts=3
+        )
+
+        self.wait_window(prompt)
+        verified, master_password = prompt.get_result()
+
+        if not verified or not master_password:
+            logger.info("Master password verification failed or cancelled - import aborted")
+            self.status_label.configure(text="⚠️ Import cancelled - master password not verified")
+            return
+
+        logger.info("Master password verified - proceeding with import of all passwords")
+
+        # Import all passwords
+        self._import_all_passwords_execute(master_password)
+
+    def _import_all_passwords_execute(self, master_password):
+        """Execute import of all passwords from CSV"""
+        try:
+            success_count = 0
+            error_count = 0
+
+            # Import ALL rows
+            for row_idx, row in enumerate(self.all_data):
+                try:
+                    # Extract data based on mapping
+                    entry_name = row[self.column_map["name"]] if "name" in self.column_map and len(row) > self.column_map["name"] else ""
+                    website = row[self.column_map["website"]] if "website" in self.column_map and len(row) > self.column_map["website"] else ""
+                    username = row[self.column_map["username"]] if "username" in self.column_map and len(row) > self.column_map["username"] else ""
+                    password = row[self.column_map["password"]] if "password" in self.column_map and len(row) > self.column_map["password"] else ""
+                    remarks = row[self.column_map["remarks"]] if "remarks" in self.column_map and len(row) > self.column_map["remarks"] else ""
+
+                    # Skip empty rows
+                    if not website or not username or not password:
+                        error_count += 1
+                        continue
+
+                    # Add password entry with master password for encryption
+                    self.password_manager.add_password_entry(
+                        session_id=self.session_id,
+                        entry_name=entry_name.strip() if entry_name else None,
+                        website=website.strip(),
+                        username=username.strip(),
+                        password=password,
+                        remarks=remarks.strip() if remarks else "",
+                        master_password=master_password
+                    )
+                    success_count += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to import row {row_idx}: {e}")
+                    error_count += 1
+                    continue
+
+            # Show results
+            if success_count > 0:
+                message = f"✅ Successfully imported {success_count} password{'s' if success_count != 1 else ''}"
+                if error_count > 0:
+                    message += f"\n⚠️ {error_count} error{'s' if error_count != 1 else ''} occurred"
+
+                messagebox.showinfo("Import Complete", message, parent=self)
+                logger.info(f"Import complete: {success_count} success, {error_count} errors")
+
+                # Refresh main window
+                if self.on_success:
+                    self.on_success()
+
+                # Close dialog
+                self.destroy()
+            else:
+                messagebox.showerror("Import Failed", f"Failed to import any passwords.\n{error_count} error(s) occurred.", parent=self)
+                logger.error("Import failed - no passwords imported")
+
+        except Exception as e:
+            logger.error(f"Import execution failed: {e}")
+            messagebox.showerror("Import Error", f"An error occurred during import:\n{str(e)}", parent=self)
 
     def _go_to_selection_step(self):
         """Validate mapping and go to step 2: password selection"""
@@ -3341,6 +3534,7 @@ class CSVImportDialog(ctk.CTkToplevel):
         for row_idx, row in enumerate(self.all_data):
             try:
                 # Extract data based on mapping
+                entry_name = row[self.column_map["name"]] if "name" in self.column_map and len(row) > self.column_map["name"] else ""
                 website = row[self.column_map["website"]] if "website" in self.column_map and len(row) > self.column_map["website"] else ""
                 username = row[self.column_map["username"]] if "username" in self.column_map and len(row) > self.column_map["username"] else ""
                 remarks = row[self.column_map["remarks"]] if "remarks" in self.column_map and len(row) > self.column_map["remarks"] else ""
@@ -3482,6 +3676,7 @@ class CSVImportDialog(ctk.CTkToplevel):
                     row = self.all_data[row_idx]
 
                     # Extract data based on mapping
+                    entry_name = row[self.column_map["name"]] if "name" in self.column_map and len(row) > self.column_map["name"] else ""
                     website = row[self.column_map["website"]] if "website" in self.column_map and len(row) > self.column_map["website"] else ""
                     username = row[self.column_map["username"]] if "username" in self.column_map and len(row) > self.column_map["username"] else ""
                     password = row[self.column_map["password"]] if "password" in self.column_map and len(row) > self.column_map["password"] else ""
@@ -3495,6 +3690,7 @@ class CSVImportDialog(ctk.CTkToplevel):
                     # Add password entry with master password for encryption
                     self.password_manager.add_password_entry(
                         session_id=self.session_id,
+                        entry_name=entry_name.strip() if entry_name else None,
                         website=website.strip(),
                         username=username.strip(),
                         password=password,
