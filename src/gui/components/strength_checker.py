@@ -7,7 +7,7 @@ This module provides visual password strength indication with real-time
 analysis and improvement recommendations.
 
 Author: Personal Password Manager
-Version: 2.0.0
+Version: 2.2.0
 """
 
 import customtkinter as ctk

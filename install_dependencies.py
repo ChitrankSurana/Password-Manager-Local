@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Personal Password Manager v2.0.0 - Dependency Installer
+Personal Password Manager v2.2.0 - Dependency Installer
 ========================================================
 
 This script automatically checks and installs all required dependencies
@@ -368,7 +368,7 @@ def main() -> int:
     Returns:
         int: Exit code (0 = success, 1 = failure)
     """
-    print_header("Personal Password Manager v2.0.0 - Dependency Installer")
+    print_header("Personal Password Manager v2.2.0 - Dependency Installer")
     print("This script will automatically install all required dependencies.\n")
     print(f"Platform: {platform.system()} {platform.release()}")
     print(f"Python: {sys.version}\n")

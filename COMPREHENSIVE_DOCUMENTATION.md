@@ -1,4 +1,4 @@
-# Personal Password Manager v2.0.0 - Complete Documentation
+# Personal Password Manager v2.2.0 - Complete Documentation
 
 **The Ultimate Secure Password Management Solution**
 
@@ -156,7 +156,7 @@ python install_dependencies.py
 **Output:**
 ```
 =================================================
-  Personal Password Manager v2.0.0 - Installer
+  Personal Password Manager v2.2.0 - Installer
 =================================================
 
 [STEP] Checking Python version...
@@ -545,7 +545,7 @@ Supported browsers:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│ Personal Password Manager v2.0.0    ⚙️  🚪           │
+│ Personal Password Manager v2.2.0    ⚙️  🚪           │
 ├──────────────────────────────────────────────────────┤
 │                                                      │
 │ Search: [                          ] 🔍             │
@@ -1661,7 +1661,7 @@ Version 1: Initial schema
   - users, passwords, sessions tables
   - Basic encryption support
 
-Version 2: Enhanced features (v2.0.0)
+Version 2: Enhanced features (v2.2.0)
   - Added entry_name to passwords table
   - Added user_settings table
   - Added security_audit_log table
@@ -2458,7 +2458,7 @@ v1.0.0 (Initial Release)
 ├─ CSV import/export
 └─ Dark/light themes
 
-v2.0.0 (Current)
+v2.2.0 (Current)
 ├─ Enhanced security features
 ├─ Master password re-verification
 ├─ Timed password viewing
@@ -2748,7 +2748,7 @@ Open Maximized: Yes
 
 # Conclusion
 
-**Personal Password Manager v2.0.0** provides enterprise-grade password security with user-friendly features. This comprehensive documentation covers every aspect of the application, from basic usage to advanced security features.
+**Personal Password Manager v2.2.0** provides enterprise-grade password security with user-friendly features. This comprehensive documentation covers every aspect of the application, from basic usage to advanced security features.
 
 **Key Takeaways:**
 - ✅ Military-grade AES-256 encryption
@@ -2768,7 +2768,7 @@ Open Maximized: Yes
 
 ---
 
-*Document Version: 2.0.0*
+*Document Version: 2.2.0*
 *Last Updated: October 28, 2025*
 *Total Pages: 150+*
 *Total Word Count: 40,000+*

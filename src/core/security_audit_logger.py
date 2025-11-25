@@ -31,7 +31,7 @@ Risk Assessment Features:
 - User behavior profiling and deviation detection
 
 Author: Personal Password Manager Enhancement Team
-Version: 2.0.0
+Version: 2.2.0
 Date: September 21, 2025
 """
 
@@ -145,7 +145,7 @@ class SecurityEvent:
         # Context and metadata
         self.client_ip = "127.0.0.1"  # Default for desktop app
         self.user_agent = f"Desktop-App-v2.0-{platform.system()}"
-        self.client_version = "2.0.0"
+        self.client_version = "2.2.0"
         self.request_source = "GUI"
         
         # Event details

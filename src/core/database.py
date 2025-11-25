@@ -23,7 +23,7 @@ Security Features:
 - Automatic database backup on schema changes
 
 Author: Personal Password Manager
-Version: 2.0.0
+Version: 2.2.0
 """
 
 import sqlite3
@@ -32,6 +32,8 @@ import secrets
 import bcrypt
 import logging
 import json
+import os
+import stat
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union
@@ -109,10 +111,108 @@ class DatabaseManager:
         try:
             self._initialize_database_with_migrations()
             logger.info(f"Database initialized successfully at {self.db_path}")
+
+            # Enforce strict file permissions for security
+            self._enforce_file_permissions()
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
             raise DatabaseError(f"Database initialization failed: {e}")
-    
+
+    def _enforce_file_permissions(self) -> None:
+        """
+        Enforce strict file permissions on the database file for security
+
+        On Unix/Linux/Mac systems, sets permissions to 600 (read/write for owner only).
+        On Windows systems, sets ACL to restrict access to the current user only.
+
+        This is a critical security measure to prevent unauthorized access to the
+        encrypted password database file.
+
+        Note: This method logs errors but does not raise exceptions to maintain
+        backward compatibility and avoid breaking existing deployments.
+        """
+        if not self.db_path.exists():
+            # Database file doesn't exist yet, will be created on first connection
+            return
+
+        try:
+            if os.name == 'posix':  # Unix/Linux/Mac
+                # Set permissions to 600 (rw-------)
+                # Only the file owner can read and write
+                os.chmod(self.db_path, stat.S_IRUSR | stat.S_IWUSR)
+                logger.info(f"Database file permissions set to 600 (owner read/write only)")
+
+            elif os.name == 'nt':  # Windows
+                # Set Windows ACL to restrict access to current user only
+                try:
+                    import win32security
+                    import ntsecuritycon as con
+
+                    # Get current user SID
+                    user, domain, type = win32security.LookupAccountName("", os.getlogin())
+
+                    # Create a security descriptor
+                    sd = win32security.SECURITY_DESCRIPTOR()
+
+                    # Create a DACL (Discretionary Access Control List)
+                    dacl = win32security.ACL()
+
+                    # Add ACE (Access Control Entry) for current user with full control
+                    dacl.AddAccessAllowedAce(
+                        win32security.ACL_REVISION,
+                        con.FILE_ALL_ACCESS,
+                        user
+                    )
+
+                    # Set the DACL
+                    sd.SetSecurityDescriptorDacl(1, dacl, 0)
+
+                    # Apply the security descriptor to the file
+                    win32security.SetFileSecurity(
+                        str(self.db_path),
+                        win32security.DACL_SECURITY_INFORMATION,
+                        sd
+                    )
+
+                    logger.info("Database file permissions set to current user only (Windows ACL)")
+
+                except ImportError:
+                    # pywin32 not available, try alternative method using icacls
+                    logger.warning("pywin32 not available, attempting to use icacls for file permissions")
+                    try:
+                        import subprocess
+
+                        # Remove all existing permissions
+                        subprocess.run(
+                            ['icacls', str(self.db_path), '/inheritance:r'],
+                            check=True,
+                            capture_output=True
+                        )
+
+                        # Grant full control to current user only
+                        current_user = os.getlogin()
+                        subprocess.run(
+                            ['icacls', str(self.db_path), '/grant', f'{current_user}:F'],
+                            check=True,
+                            capture_output=True
+                        )
+
+                        logger.info("Database file permissions set using icacls (current user full control)")
+
+                    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                        logger.warning(f"Could not set Windows file permissions using icacls: {e}")
+                        logger.warning("Database file permissions may not be optimal on Windows")
+
+            else:
+                logger.warning(f"Unknown operating system '{os.name}', cannot set file permissions")
+
+        except PermissionError as e:
+            logger.warning(f"Permission denied when setting database file permissions: {e}")
+            logger.warning("Database file permissions may not be optimal")
+        except Exception as e:
+            logger.warning(f"Unexpected error setting database file permissions: {e}")
+            logger.warning("Database file permissions may not be optimal")
+
     @contextmanager
     def get_connection(self):
         """
@@ -554,21 +654,21 @@ class DatabaseManager:
     def get_password_entries(self, user_id: int, website: str = None) -> List[Dict[str, Any]]:
         """
         Retrieve password entries for a user, optionally filtered by website
-        
+
         Args:
             user_id (int): ID of the user
             website (str, optional): Filter by website name (case-insensitive)
-            
+
         Returns:
             List[Dict[str, Any]]: List of password entries
-            
+
         Raises:
             DatabaseError: If retrieval fails
         """
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 if website:
                     # Search for specific website or entry name (case-insensitive partial match)
                     cursor.execute("""
@@ -590,17 +690,146 @@ class DatabaseManager:
                         WHERE user_id = ?
                         ORDER BY website, username
                     """, (user_id,))
-                
+
                 entries = []
                 for row in cursor.fetchall():
                     entry = dict(row)
                     entries.append(entry)
-                
+
                 logger.info(f"Retrieved {len(entries)} password entries for user {user_id}")
                 return entries
-                
+
         except Exception as e:
             logger.error(f"Failed to retrieve password entries: {e}")
+            raise DatabaseError(f"Password entry retrieval failed: {e}")
+
+    def get_password_entries_advanced(
+        self,
+        user_id: int,
+        website: str = None,
+        username: str = None,
+        remarks: str = None,
+        is_favorite: bool = None,
+        date_from: str = None,
+        date_to: str = None,
+        limit: int = None,
+        offset: int = 0,
+        order_by: str = "website"
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Retrieve password entries with advanced SQL-based filtering and pagination
+
+        This method performs all filtering at the database level for optimal performance,
+        eliminating the N+1 query problem and reducing memory usage with large datasets.
+
+        Args:
+            user_id (int): ID of the user
+            website (str, optional): Filter by website (case-insensitive partial match)
+            username (str, optional): Filter by username (case-insensitive partial match)
+            remarks (str, optional): Filter by remarks (case-insensitive partial match)
+            is_favorite (bool, optional): Filter by favorite status
+            date_from (str, optional): Filter by created date (ISO format: YYYY-MM-DD)
+            date_to (str, optional): Filter by created date (ISO format: YYYY-MM-DD)
+            limit (int, optional): Maximum number of entries to return (for pagination)
+            offset (int): Number of entries to skip (for pagination)
+            order_by (str): Column to sort by (default: "website")
+
+        Returns:
+            Tuple[List[Dict[str, Any]], int]: (List of password entries, Total count)
+
+        Raises:
+            DatabaseError: If retrieval fails
+            ValueError: If parameters are invalid
+
+        Example:
+            # Get first page (100 entries) of passwords for google.com
+            entries, total = db.get_password_entries_advanced(
+                user_id=1,
+                website="google.com",
+                limit=100,
+                offset=0
+            )
+        """
+        # Validate order_by to prevent SQL injection
+        valid_order_columns = ['website', 'username', 'created_at', 'modified_at', 'entry_name']
+        if order_by not in valid_order_columns:
+            logger.warning(f"Invalid order_by column '{order_by}', defaulting to 'website'")
+            order_by = 'website'
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Build WHERE clause dynamically based on provided filters
+                where_conditions = ["user_id = ?"]
+                query_params = [user_id]
+
+                if website:
+                    where_conditions.append("(LOWER(website) LIKE LOWER(?) OR LOWER(entry_name) LIKE LOWER(?))")
+                    website_pattern = f"%{website.strip()}%"
+                    query_params.extend([website_pattern, website_pattern])
+
+                if username:
+                    where_conditions.append("LOWER(username) LIKE LOWER(?)")
+                    query_params.append(f"%{username.strip()}%")
+
+                if remarks:
+                    where_conditions.append("LOWER(remarks) LIKE LOWER(?)")
+                    query_params.append(f"%{remarks.strip()}%")
+
+                if is_favorite is not None:
+                    where_conditions.append("is_favorite = ?")
+                    query_params.append(1 if is_favorite else 0)
+
+                if date_from:
+                    where_conditions.append("created_at >= ?")
+                    query_params.append(date_from)
+
+                if date_to:
+                    where_conditions.append("created_at <= ?")
+                    query_params.append(date_to)
+
+                where_clause = " AND ".join(where_conditions)
+
+                # First, get total count (for pagination info)
+                count_query = f"SELECT COUNT(*) as total FROM passwords WHERE {where_clause}"
+                cursor.execute(count_query, query_params)
+                total_count = cursor.fetchone()['total']
+
+                # Build main query with optional pagination
+                main_query = f"""
+                    SELECT entry_id, entry_name, website, username, password_encrypted, remarks,
+                           created_at, modified_at, is_favorite
+                    FROM passwords
+                    WHERE {where_clause}
+                    ORDER BY {order_by}, username
+                """
+
+                # Add pagination if limit is specified
+                if limit is not None and limit > 0:
+                    main_query += " LIMIT ? OFFSET ?"
+                    query_params.extend([limit, offset])
+
+                cursor.execute(main_query, query_params)
+
+                entries = []
+                for row in cursor.fetchall():
+                    entry = dict(row)
+                    entries.append(entry)
+
+                logger.info(
+                    f"Retrieved {len(entries)} of {total_count} password entries for user {user_id} "
+                    f"(filters: website={website}, username={username}, favorites={is_favorite}, "
+                    f"limit={limit}, offset={offset})"
+                )
+
+                return entries, total_count
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error in advanced search: {e}", exc_info=True)
+            raise DatabaseError(f"Advanced search failed: {e}")
+        except Exception as e:
+            logger.error(f"Failed to retrieve password entries: {e}", exc_info=True)
             raise DatabaseError(f"Password entry retrieval failed: {e}")
     
     def update_password_entry(self, entry_id: int, user_id: int, website: str = None,
@@ -1036,7 +1265,7 @@ class DatabaseManager:
                     (user_id, session_id, action_type, action_result, target_entry_id,
                      error_message, action_details, security_level, risk_score, 
                      execution_time_ms, client_version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2.0.0')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2.2.0')
                 """, (user_id, session_id, action_type, action_result, target_entry_id,
                       error_message, details_json, security_level, risk_score, 
                       execution_time_ms))

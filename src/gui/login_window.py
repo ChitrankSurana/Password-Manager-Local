@@ -25,7 +25,7 @@ Security Features:
 - Input validation and sanitization
 
 Author: Personal Password Manager
-Version: 2.0.0
+Version: 2.2.0
 """
 
 import customtkinter as ctk
@@ -687,14 +687,14 @@ class CreateAccountDialog(ctk.CTkToplevel):
     def _setup_dialog(self):
         """Setup dialog properties"""
         self.title("Create New Account")
-        self.geometry("350x400")
+        self.geometry("400x420")
         self.resizable(False, False)
-        
+
         # Center on parent
         if self.master:
-            x = self.master.winfo_x() + (self.master.winfo_width() // 2) - 175
-            y = self.master.winfo_y() + (self.master.winfo_height() // 2) - 200
-            self.geometry(f"350x400+{x}+{y}")
+            x = self.master.winfo_x() + (self.master.winfo_width() // 2) - 200
+            y = self.master.winfo_y() + (self.master.winfo_height() // 2) - 210
+            self.geometry(f"400x420+{x}+{y}")
         
         # Apply theme
         apply_window_theme(self)
@@ -738,28 +738,58 @@ class CreateAccountDialog(ctk.CTkToplevel):
         # Password field
         password_label = create_themed_label(main_frame, text="Master Password", style="label")
         password_label.pack(anchor="w", pady=(0, spacing["padding_xs"]))
-        
+
+        # Password frame (for entry + toggle)
+        password_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        password_frame.pack(fill="x", pady=(0, spacing["padding_md"]))
+
         self.password_entry = create_themed_entry(
-            main_frame,
+            password_frame,
             placeholder_text="Enter master password",
             textvariable=self.password_var,
             style="entry_password",
             show="*"
         )
-        self.password_entry.pack(fill="x", pady=(0, spacing["padding_md"]))
-        
+        self.password_entry.pack(side="left", fill="both", expand=True)
+
+        # Show/hide password toggle
+        self.toggle_password_btn = create_themed_button(
+            password_frame,
+            text="👁",
+            style="button_secondary",
+            width=40,
+            command=self._toggle_password_visibility
+        )
+        self.toggle_password_btn.pack(side="right", padx=(spacing["padding_xs"], 0))
+        ToolTip(self.toggle_password_btn, "Show or hide password")
+
         # Confirm password field
         confirm_label = create_themed_label(main_frame, text="Confirm Password", style="label")
         confirm_label.pack(anchor="w", pady=(0, spacing["padding_xs"]))
-        
+
+        # Confirm password frame (for entry + toggle)
+        confirm_password_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        confirm_password_frame.pack(fill="x", pady=(0, spacing["padding_md"]))
+
         self.confirm_password_entry = create_themed_entry(
-            main_frame,
+            confirm_password_frame,
             placeholder_text="Confirm master password",
             textvariable=self.confirm_password_var,
             style="entry_password",
             show="*"
         )
-        self.confirm_password_entry.pack(fill="x", pady=(0, spacing["padding_md"]))
+        self.confirm_password_entry.pack(side="left", fill="both", expand=True)
+
+        # Show/hide confirm password toggle
+        self.toggle_confirm_password_btn = create_themed_button(
+            confirm_password_frame,
+            text="👁",
+            style="button_secondary",
+            width=40,
+            command=self._toggle_confirm_password_visibility
+        )
+        self.toggle_confirm_password_btn.pack(side="right", padx=(spacing["padding_xs"], 0))
+        ToolTip(self.toggle_confirm_password_btn, "Show or hide confirm password")
         
         # Status area
         self.status_label = create_themed_label(main_frame, text="", style="label_secondary")
@@ -786,7 +816,25 @@ class CreateAccountDialog(ctk.CTkToplevel):
         )
         cancel_btn.pack(side="right")
         ToolTip(cancel_btn, "Cancel account creation and return to login")
-    
+
+    def _toggle_password_visibility(self):
+        """Toggle password field visibility"""
+        if self.password_entry.cget("show") == "*":
+            self.password_entry.configure(show="")
+            self.toggle_password_btn.configure(text="🙈")
+        else:
+            self.password_entry.configure(show="*")
+            self.toggle_password_btn.configure(text="👁")
+
+    def _toggle_confirm_password_visibility(self):
+        """Toggle confirm password field visibility"""
+        if self.confirm_password_entry.cget("show") == "*":
+            self.confirm_password_entry.configure(show="")
+            self.toggle_confirm_password_btn.configure(text="🙈")
+        else:
+            self.confirm_password_entry.configure(show="*")
+            self.toggle_confirm_password_btn.configure(text="👁")
+
     def _create_account(self):
         """Handle account creation"""
         username = self.username_var.get().strip()

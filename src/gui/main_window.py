@@ -25,7 +25,7 @@ Security Features:
 - Memory-safe password operations
 
 Author: Personal Password Manager
-Version: 2.0.0
+Version: 2.2.0
 """
 
 import customtkinter as ctk
@@ -3048,7 +3048,7 @@ class SettingsDialog(ctk.CTkToplevel):
         
         about_text = ctk.CTkLabel(
             about_frame,
-            text="Personal Password Manager v2.0.0\n"
+            text="Personal Password Manager v2.2.0\n"
                  "Secure local password storage with AES-256 encryption\n"
                  "PBKDF2 key derivation with 100,000+ iterations\n"
                  "Built with Python & CustomTkinter\n\n"

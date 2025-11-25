@@ -24,7 +24,7 @@ Test Coverage:
 - Database migration and schema validation
 
 Author: Personal Password Manager Enhancement Team
-Version: 2.0.0
+Version: 2.2.0
 Date: September 21, 2025
 """
 
@@ -540,7 +540,7 @@ def check_dependencies():
 
 if __name__ == "__main__":
     print("🚀 Personal Password Manager - Enhanced Features Integration Test")
-    print(f"Version: 2.0.0")
+    print(f"Version: 2.2.0")
     print(f"Date: September 21, 2025")
     print("")
     

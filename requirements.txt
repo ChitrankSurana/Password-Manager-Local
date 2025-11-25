@@ -21,6 +21,7 @@ python-dateutil>=2.8.0        # Date parsing and manipulation for backup timesta
 flask>=2.3.0                  # Lightweight web framework for web interface
 flask-session>=0.5.0          # Session management for web interface security
 flask-wtf>=1.1.0              # CSRF protection and form validation
+flask-limiter>=3.5.0          # Rate limiting for brute force protection
 wtforms>=3.0.0                # Form validation and rendering
 jinja2>=3.1.0                 # Template engine for HTML generation
 werkzeug>=2.3.0               # WSGI utilities and development server
@@ -55,3 +56,6 @@ pytest-cov>=4.1.0            # Coverage plugin for pytest
 pytest-mock>=3.11.0          # Mocking plugin for pytest
 selenium>=4.15.0              # Web browser automation for end-to-end tests (optional)
 mock>=5.1.0                   # Mock object library for testing
+
+# Executable Building
+pyinstaller>=6.0.0           # Creates standalone executables for distribution

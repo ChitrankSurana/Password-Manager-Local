@@ -21,7 +21,7 @@ New Features in Version 2.0:
 - Enhanced UI components with modern security workflows
 
 Author: Personal Password Manager Enhancement Team
-Version: 2.0.0
+Version: 2.2.0
 Date: September 21, 2025
 """
 
@@ -39,7 +39,7 @@ def print_banner():
     banner = """
     ==============================================================
                    Personal Password Manager                     
-                        Version 2.0.0 Enhanced                          
+                        Version 2.2.0 Enhanced                          
                                                                   
     A secure, local password manager with advanced security    
     features, time-based password viewing, and comprehensive   
@@ -375,7 +375,7 @@ def main_enhanced():
         if not args.check_deps:
             print_banner()
         
-        logging.info("Starting Personal Password Manager v2.0.0 Enhanced")
+        logging.info("Starting Personal Password Manager v2.2.0 Enhanced")
         
         # Handle dependency check
         if args.check_deps:
@@ -517,7 +517,7 @@ def launch_web():
 def parse_arguments():
     """Parse command line arguments - same as original"""
     parser = argparse.ArgumentParser(
-        description='Personal Password Manager v2.0.0 Enhanced - Advanced password management with security features',
+        description='Personal Password Manager v2.2.0 Enhanced - Advanced password management with security features',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     

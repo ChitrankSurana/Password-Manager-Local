@@ -7,7 +7,7 @@ This module provides comprehensive backup and restore functionality with export/
 capabilities for the password manager, featuring a modern interface for data management.
 
 Author: Personal Password Manager
-Version: 2.0.0
+Version: 2.2.0
 """
 
 import customtkinter as ctk

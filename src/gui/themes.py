@@ -26,7 +26,7 @@ Design Principles:
 - Responsive layout considerations
 
 Author: Personal Password Manager
-Version: 2.0.0
+Version: 2.2.0
 """
 
 import customtkinter as ctk

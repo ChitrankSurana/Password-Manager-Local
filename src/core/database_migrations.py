@@ -21,7 +21,7 @@ Security Features:
 - Detailed audit logging of migration activities
 
 Author: Personal Password Manager Enhancement
-Version: 2.0.0
+Version: 2.2.0
 Date: September 21, 2025
 """
 
@@ -502,7 +502,7 @@ class DatabaseMigrationManager:
             (user_id, session_id, action_type, action_result, action_details, 
              security_level, client_version, request_source)
             VALUES (0, 'SYSTEM_MIGRATION', 'DATABASE_MIGRATION', 'SUCCESS', 
-                    ?, 'HIGH', '2.0.0', 'MIGRATION_SYSTEM')
+                    ?, 'HIGH', '2.2.0', 'MIGRATION_SYSTEM')
         """, (json.dumps({
             'migration_version': 2,
             'migration_type': 'SCHEMA_UPDATE',

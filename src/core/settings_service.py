@@ -31,7 +31,7 @@ Security Features:
 - Settings integrity validation
 
 Author: Personal Password Manager Enhancement Team
-Version: 2.0.0
+Version: 2.2.0
 Date: September 21, 2025
 """
 
@@ -96,7 +96,7 @@ class SettingDefinition:
     # Security and behavior
     is_sensitive: bool = False                          # Don't log value changes
     affects_security: bool = False                      # Security-related setting
-    version_introduced: str = "2.0.0"                  # Version when added
+    version_introduced: str = "2.2.0"                  # Version when added
 
 class SettingsValidationError(Exception):
     """Raised when setting validation fails"""
@@ -722,7 +722,7 @@ class SettingsService:
         export_data = {
             'user_id': user_id,
             'export_timestamp': datetime.now().isoformat(),
-            'settings_version': '2.0.0',
+            'settings_version': '2.2.0',
             'settings': {}
         }
         

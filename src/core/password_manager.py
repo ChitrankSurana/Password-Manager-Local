@@ -27,7 +27,7 @@ Security Features:
 - Memory clearing for sensitive data
 
 Author: Personal Password Manager
-Version: 2.0.0
+Version: 2.2.0
 """
 
 import logging
@@ -416,13 +416,161 @@ class PasswordManagerCore:
             
             logger.debug(f"Found {len(password_entries)} matching password entries")
             return password_entries
-            
+
         except (InvalidSessionError, SessionExpiredError):
             raise
         except Exception as e:
             logger.error(f"Failed to search password entries: {e}")
             raise PasswordManagerError(f"Search failed: {e}")
-    
+
+    def search_password_entries_optimized(
+        self,
+        session_id: str,
+        criteria: SearchCriteria = None,
+        master_password: str = None,
+        include_passwords: bool = False,
+        page: int = 1,
+        per_page: int = 100
+    ) -> Tuple[List[PasswordEntry], Dict[str, Any]]:
+        """
+        Search password entries with optimized SQL-based filtering and pagination
+
+        This method provides significant performance improvements over search_password_entries()
+        by performing all filtering at the database level instead of in Python. This eliminates
+        the N+1 query problem and reduces memory usage with large datasets.
+
+        Performance Benefits:
+        - All filtering done in SQL (faster)
+        - Pagination reduces memory usage
+        - Returns only requested page of results
+        - Provides total count for pagination UI
+
+        Args:
+            session_id (str): Valid session token
+            criteria (SearchCriteria, optional): Search and filter criteria
+            master_password (str, optional): Master password for password decryption
+            include_passwords (bool): Whether to include decrypted passwords
+            page (int): Page number (1-indexed, default: 1)
+            per_page (int): Results per page (default: 100)
+
+        Returns:
+            Tuple[List[PasswordEntry], Dict[str, Any]]: (Password entries, Pagination info)
+                Pagination info contains:
+                - total_count: Total matching entries
+                - page: Current page number
+                - per_page: Results per page
+                - total_pages: Total number of pages
+                - has_next: Whether there's a next page
+                - has_prev: Whether there's a previous page
+
+        Raises:
+            InvalidSessionError: If session is invalid
+            ValueError: If page or per_page parameters are invalid
+
+        Example:
+            criteria = SearchCriteria(website="google.com", is_favorite=True)
+            entries, pagination = manager.search_password_entries_optimized(
+                session_id, criteria, page=1, per_page=50
+            )
+            print(f"Page {pagination['page']} of {pagination['total_pages']}")
+        """
+        # Validate pagination parameters
+        if page < 1:
+            raise ValueError("Page number must be >= 1")
+        if per_page < 1 or per_page > 1000:
+            raise ValueError("Per page must be between 1 and 1000")
+
+        try:
+            # Validate session
+            session = self.auth_manager.validate_session(session_id)
+
+            # Use default criteria if none provided
+            if criteria is None:
+                criteria = SearchCriteria()
+
+            # Calculate offset for pagination
+            offset = (page - 1) * per_page
+
+            # Convert date criteria to ISO format strings if provided
+            date_from_str = criteria.date_from.isoformat() if criteria.date_from else None
+            date_to_str = criteria.date_to.isoformat() if criteria.date_to else None
+
+            # Use optimized database query with SQL-level filtering
+            db_entries, total_count = self.auth_manager.db_manager.get_password_entries_advanced(
+                user_id=session.user_id,
+                website=criteria.website,
+                username=criteria.username,
+                remarks=criteria.remarks,
+                is_favorite=criteria.is_favorite,
+                date_from=date_from_str,
+                date_to=date_to_str,
+                limit=per_page,
+                offset=offset,
+                order_by=criteria.sort_by or "website"
+            )
+
+            # Convert to PasswordEntry objects
+            password_entries = []
+
+            for db_entry in db_entries:
+                # Decrypt password if requested and master password available
+                decrypted_password = ""
+                if include_passwords:
+                    mp = master_password or self._get_cached_master_password(session_id)
+                    if mp and self._verify_master_password(session_id, mp):
+                        try:
+                            decrypted_password = session.encryption_system.decrypt_password(
+                                db_entry['password_encrypted'], mp
+                            )
+                            # Cache master password if successful
+                            self._cache_master_password(session_id, mp)
+                        except (DecryptionError, EncryptionError):
+                            logger.warning(f"Failed to decrypt password for entry {db_entry['entry_id']}")
+                            decrypted_password = "[Decryption Failed]"
+
+                # Create PasswordEntry object
+                entry = PasswordEntry(
+                    entry_id=db_entry['entry_id'],
+                    entry_name=db_entry.get('entry_name'),
+                    website=db_entry['website'],
+                    username=db_entry['username'],
+                    password=decrypted_password,
+                    remarks=db_entry.get('remarks', ''),
+                    created_at=datetime.fromisoformat(db_entry['created_at']) if db_entry.get('created_at') else None,
+                    modified_at=datetime.fromisoformat(db_entry['modified_at']) if db_entry.get('modified_at') else None,
+                    is_favorite=bool(db_entry.get('is_favorite', False))
+                )
+
+                password_entries.append(entry)
+
+            # Calculate pagination info
+            total_pages = (total_count + per_page - 1) // per_page  # Ceiling division
+            pagination_info = {
+                'total_count': total_count,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1,
+                'showing_start': offset + 1 if total_count > 0 else 0,
+                'showing_end': min(offset + per_page, total_count)
+            }
+
+            logger.debug(
+                f"Found {len(password_entries)} entries (page {page}/{total_pages}, "
+                f"total: {total_count})"
+            )
+
+            return password_entries, pagination_info
+
+        except (InvalidSessionError, SessionExpiredError):
+            raise
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to search password entries (optimized): {e}", exc_info=True)
+            raise PasswordManagerError(f"Optimized search failed: {e}")
+
     def update_password_entry(self, session_id: str, entry_id: int, website: str = None,
                              username: str = None, password: str = None, master_password: str = None,
                              remarks: str = None, is_favorite: bool = None, entry_name: str = None) -> bool:

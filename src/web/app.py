@@ -23,7 +23,7 @@ Security:
 - Rate limiting for authentication
 
 Author: Personal Password Manager
-Version: 2.0.0
+Version: 2.2.0
 """
 
 import os
@@ -36,6 +36,8 @@ from typing import Optional, Dict, Any
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask import send_file, abort
 from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 from itsdangerous import URLSafeTimedSerializer
@@ -97,7 +99,16 @@ class WebPasswordManager:
         
         # Initialize CSRF protection
         self.csrf = CSRFProtect(self.app)
-        
+
+        # Initialize rate limiting for brute force protection
+        self.limiter = Limiter(
+            get_remote_address,
+            app=self.app,
+            default_limits=["200 per day", "50 per hour"],  # Default limits for all routes
+            storage_uri="memory://",  # Use in-memory storage (for production, consider Redis)
+            strategy="fixed-window"  # Fixed window rate limiting strategy
+        )
+
         # Upload settings
         self.app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
         
@@ -126,6 +137,7 @@ class WebPasswordManager:
             return render_template('login.html')
         
         @self.app.route('/login', methods=['GET', 'POST'])
+        @self.limiter.limit("5 per minute")  # Critical: Prevent brute force attacks
         def login():
             """User login handling"""
             if request.method == 'POST':
@@ -156,6 +168,7 @@ class WebPasswordManager:
             return render_template('login.html')
         
         @self.app.route('/register', methods=['GET', 'POST'])
+        @self.limiter.limit("3 per hour")  # Prevent account creation spam
         def register():
             """User registration handling"""
             if request.method == 'POST':
@@ -576,20 +589,33 @@ class WebPasswordManager:
     
     def _register_error_handlers(self):
         """Register error handlers"""
-        
+
         @self.app.errorhandler(404)
         def not_found_error(error):
             return render_template('errors/404.html'), 404
-        
+
         @self.app.errorhandler(500)
         def internal_error(error):
             logger.error(f"Internal server error: {error}")
             return render_template('errors/500.html'), 500
-        
+
         @self.app.errorhandler(413)
         def file_too_large(error):
             flash('File is too large. Maximum size is 16MB.', 'error')
             return redirect(request.url), 413
+
+        @self.app.errorhandler(429)
+        def rate_limit_exceeded(error):
+            """Handle rate limit exceeded errors"""
+            logger.warning(f"Rate limit exceeded: {request.remote_addr} - {request.path}")
+            flash('Too many requests. Please wait a moment and try again.', 'error')
+            # Return to the page that triggered the rate limit
+            if 'login' in request.path:
+                return render_template('login.html'), 429
+            elif 'register' in request.path:
+                return render_template('register.html'), 429
+            else:
+                return redirect(url_for('index')), 429
     
     def _analyze_password_health(self, passwords):
         """Analyze password health and return detailed report"""

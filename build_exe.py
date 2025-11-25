@@ -104,7 +104,7 @@ def create_distribution():
             return False
         
         # Create README for distribution
-        readme_content = f"""# Personal Password Manager v2.0.0
+        readme_content = f"""# Personal Password Manager v2.2.0
 
 ## Installation
 1. Extract all files to a folder of your choice
@@ -133,7 +133,7 @@ def create_distribution():
 For issues or questions, refer to the documentation or contact support.
 
 ## License
-Personal Password Manager v2.0.0
+Personal Password Manager v2.2.0
 Copyright © 2024
 """
         

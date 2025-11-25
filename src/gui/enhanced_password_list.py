@@ -31,7 +31,7 @@ UI Enhancements:
 - Responsive design with consistent theming
 
 Author: Personal Password Manager Enhancement Team
-Version: 2.0.0
+Version: 2.2.0
 Date: September 21, 2025
 """
 
