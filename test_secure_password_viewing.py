@@ -4,25 +4,24 @@ Test script for secure password viewing functionality
 Tests the newly implemented master password verification and timed viewing
 """
 
-import sys
 import os
+import sys
 import tempfile
 from pathlib import Path
+
+from core.password_manager import PasswordManagerCore
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from core.database import DatabaseManager
-from core.auth import AuthenticationManager
-from core.password_manager import PasswordManagerCore
 
 def test_master_password_prompt_backend():
     """Test the backend functionality for master password verification"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 1: Master Password Verification Backend")
-    print("="*60)
+    print("=" * 60)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
         temp_db = tmp.name
 
     try:
@@ -31,12 +30,16 @@ def test_master_password_prompt_backend():
         password_manager = PasswordManagerCore(temp_db)
 
         # Create test user
-        user_id = password_manager.auth_manager.create_user_account("testuser", "master_password_123")
+        user_id = password_manager.auth_manager.create_user_account(
+            "testuser", "master_password_123"
+        )
         print(f"  [PASS] Created test user (ID: {user_id})")
 
         # Authenticate
-        session_id = password_manager.auth_manager.authenticate_user("testuser", "master_password_123")
-        print(f"  [PASS] User authenticated")
+        session_id = password_manager.auth_manager.authenticate_user(
+            "testuser", "master_password_123"
+        )
+        print("  [PASS] User authenticated")
 
         # Add a password entry
         entry_id = password_manager.add_password_entry(
@@ -45,7 +48,7 @@ def test_master_password_prompt_backend():
             username="testuser",
             password="original_password_123",
             remarks="Test entry",
-            master_password="master_password_123"
+            master_password="master_password_123",
         )
         print(f"  [PASS] Created password entry (ID: {entry_id})")
 
@@ -53,7 +56,9 @@ def test_master_password_prompt_backend():
         # Test: Verify master password through database
         # ====================================================================
         print("\n[*] Test 1A: Verify correct master password...")
-        user_data = password_manager.auth_manager.db_manager.authenticate_user("testuser", "master_password_123")
+        user_data = password_manager.auth_manager.db_manager.authenticate_user(
+            "testuser", "master_password_123"
+        )
         assert user_data is not None, "Correct password should authenticate"
         print("  [PASS] Correct master password verified")
 
@@ -61,7 +66,9 @@ def test_master_password_prompt_backend():
         # Test: Verify incorrect password fails
         # ====================================================================
         print("\n[*] Test 1B: Verify incorrect master password fails...")
-        user_data = password_manager.auth_manager.db_manager.authenticate_user("testuser", "wrong_password")
+        user_data = password_manager.auth_manager.db_manager.authenticate_user(
+            "testuser", "wrong_password"
+        )
         assert user_data is None, "Wrong password should not authenticate"
         print("  [PASS] Incorrect password rejected")
 
@@ -70,17 +77,15 @@ def test_master_password_prompt_backend():
         # ====================================================================
         print("\n[*] Test 1C: Retrieve password entry...")
         entry = password_manager.get_password_entry(
-            session_id=session_id,
-            entry_id=entry_id,
-            master_password="master_password_123"
+            session_id=session_id, entry_id=entry_id, master_password="master_password_123"
         )
         assert entry is not None, "Should retrieve entry"
         assert entry.password == "original_password_123", "Password should decrypt correctly"
         print("  [PASS] Password entry retrieved and decrypted")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 1: Master password verification works!")
-        print("="*60)
+        print("=" * 60)
 
         return True
 
@@ -88,20 +93,21 @@ def test_master_password_prompt_backend():
         if os.path.exists(temp_db):
             os.remove(temp_db)
 
+
 def test_security_features():
     """Test security features of password viewing"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 2: Security Features")
-    print("="*60)
+    print("=" * 60)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
         temp_db = tmp.name
 
     try:
         password_manager = PasswordManagerCore(temp_db)
 
         # Create user and entry
-        user_id = password_manager.auth_manager.create_user_account("alice", "alice_master_123")
+        password_manager.auth_manager.create_user_account("alice", "alice_master_123")
         session_id = password_manager.auth_manager.authenticate_user("alice", "alice_master_123")
 
         entry_id = password_manager.add_password_entry(
@@ -110,7 +116,7 @@ def test_security_features():
             username="alice",
             password="secret_password_456",
             remarks="Secure entry",
-            master_password="alice_master_123"
+            master_password="alice_master_123",
         )
         print("\n[*] Created secure password entry")
 
@@ -121,6 +127,7 @@ def test_security_features():
 
         # Get raw database entry
         import sqlite3
+
         conn = sqlite3.connect(temp_db)
         cursor = conn.cursor()
         cursor.execute("SELECT password_encrypted FROM passwords WHERE entry_id = ?", (entry_id,))
@@ -138,15 +145,14 @@ def test_security_features():
         print("\n[*] Test 2B: Password retrieval requires master password...")
 
         entry = password_manager.get_password_entry(
-            session_id=session_id,
-            entry_id=entry_id,
-            master_password="alice_master_123"
+            session_id=session_id, entry_id=entry_id, master_password="alice_master_123"
         )
         assert entry.password == "secret_password_456", "Correct master password should decrypt"
         print("  [PASS] Correct master password decrypts password")
 
         # Try with wrong password (should fail)
         from core.password_manager import MasterPasswordRequiredError
+
         try:
             # This should use cached master password or require it
             entry_no_master = password_manager.get_password_entry(
@@ -159,9 +165,9 @@ def test_security_features():
         except MasterPasswordRequiredError:
             print("  [PASS] Master password required (high security)")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 2: Security features validated!")
-        print("="*60)
+        print("=" * 60)
 
         return True
 
@@ -169,11 +175,12 @@ def test_security_features():
         if os.path.exists(temp_db):
             os.remove(temp_db)
 
+
 def test_edit_dialog_initialization():
     """Test that EditPasswordDialog initializes with empty password"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 3: Edit Dialog Security Initialization")
-    print("="*60)
+    print("=" * 60)
 
     print("\n[*] Testing dialog initialization behavior...")
     print("  [INFO] EditPasswordDialog should:")
@@ -194,11 +201,12 @@ def test_edit_dialog_initialization():
     print("    7. Verify password appears with countdown")
     print("    8. Wait for auto-hide or click Hide button")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("[INFO] TEST 3: Manual GUI testing required")
-    print("="*60)
+    print("=" * 60)
 
     return True
+
 
 def main():
     """Run all secure password viewing tests"""
@@ -276,13 +284,16 @@ def main():
     except AssertionError as e:
         print(f"\n[FAIL] TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
     except Exception as e:
         print(f"\n[ERROR] UNEXPECTED ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     exit_code = main()

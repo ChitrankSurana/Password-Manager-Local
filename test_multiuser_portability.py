@@ -7,23 +7,23 @@ This verifies that:
 3. Portability works with multiple users
 """
 
-import sys
 import os
+import sys
 import tempfile
 from pathlib import Path
+
+from core.database import DatabaseManager
+from core.encryption import PasswordEncryption
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from core.database import DatabaseManager
-from core.auth import AuthenticationManager
-from core.encryption import PasswordEncryption
 
 def test_multiuser_password_isolation():
     """Test that passwords are properly isolated between users"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 1: Multi-User Password Isolation")
-    print("="*60)
+    print("=" * 60)
 
     # Create a temporary database
     with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
@@ -37,7 +37,8 @@ def test_multiuser_password_isolation():
         user1_id = db.create_user("Alice", "alice_master_pass_123")
         user2_id = db.create_user("Bob", "bob_master_pass_456")
         user3_id = db.create_user("Charlie", "charlie_master_pass_789")
-        print(f"  [PASS] Created users - Alice (ID: {user1_id}), Bob (ID: {user2_id}), Charlie (ID: {user3_id})")
+        print(
+            f"  [PASS] Created users - Alice (ID: {user1_id}), Bob (ID: {user2_id}), Charlie (ID: {user3_id})")
 
         # Create encryption instances for each user
         enc_alice = PasswordEncryption()
@@ -48,7 +49,12 @@ def test_multiuser_password_isolation():
         print("\n[*] Adding passwords for Alice...")
         alice_pass1 = enc_alice.encrypt_password("alice_gmail_password", "alice_master_pass_123")
         alice_pass2 = enc_alice.encrypt_password("alice_facebook_password", "alice_master_pass_123")
-        db.add_password_entry(user1_id, "gmail.com", "alice@email.com", alice_pass1, "Alice's email")
+        db.add_password_entry(
+            user1_id,
+            "gmail.com",
+            "alice@email.com",
+            alice_pass1,
+            "Alice's email")
         db.add_password_entry(user1_id, "facebook.com", "alice123", alice_pass2, "Alice's social")
         print("  [PASS] Added 2 passwords for Alice")
 
@@ -64,8 +70,14 @@ def test_multiuser_password_isolation():
 
         # Add passwords for Charlie
         print("\n[*] Adding passwords for Charlie...")
-        charlie_pass1 = enc_charlie.encrypt_password("charlie_gmail_password", "charlie_master_pass_789")
-        db.add_password_entry(user3_id, "gmail.com", "charlie@email.com", charlie_pass1, "Charlie's email")
+        charlie_pass1 = enc_charlie.encrypt_password(
+            "charlie_gmail_password", "charlie_master_pass_789")
+        db.add_password_entry(
+            user3_id,
+            "gmail.com",
+            "charlie@email.com",
+            charlie_pass1,
+            "Charlie's email")
         print("  [PASS] Added 1 password for Charlie")
 
         # Verify Alice can ONLY see her passwords
@@ -81,13 +93,15 @@ def test_multiuser_password_isolation():
         bob_entries = db.get_password_entries(user2_id)
         assert len(bob_entries) == 3, f"Bob should have 3 passwords, got {len(bob_entries)}"
         bob_websites = [entry['website'] for entry in bob_entries]
-        assert set(bob_websites) == {'gmail.com', 'twitter.com', 'github.com'}, "Bob's websites don't match"
+        assert set(bob_websites) == {'gmail.com', 'twitter.com',
+                                     'github.com'}, "Bob's websites don't match"
         print(f"  [PASS] Bob sees only his 3 passwords: {bob_websites}")
 
         # Verify Charlie can ONLY see his passwords
         print("\n[*] Verifying Charlie can only see his own passwords...")
         charlie_entries = db.get_password_entries(user3_id)
-        assert len(charlie_entries) == 1, f"Charlie should have 1 password, got {len(charlie_entries)}"
+        assert len(charlie_entries) == 1, f"Charlie should have 1 password, got {
+            len(charlie_entries)}"
         charlie_websites = [entry['website'] for entry in charlie_entries]
         assert charlie_websites == ['gmail.com'], "Charlie's website doesn't match"
         print(f"  [PASS] Charlie sees only his 1 password: {charlie_websites}")
@@ -95,7 +109,9 @@ def test_multiuser_password_isolation():
         # Verify Alice's encrypted passwords can ONLY be decrypted with Alice's master password
         print("\n[*] Verifying password encryption isolation...")
         alice_gmail = db.get_password_entries(user1_id, "gmail.com")[0]
-        decrypted = enc_alice.decrypt_password(alice_gmail['password_encrypted'], "alice_master_pass_123")
+        decrypted = enc_alice.decrypt_password(
+            alice_gmail['password_encrypted'],
+            "alice_master_pass_123")
         assert decrypted == "alice_gmail_password", "Alice's password decryption failed"
         print("  [PASS] Alice's password decrypts correctly with her master password")
 
@@ -123,9 +139,9 @@ def test_multiuser_password_isolation():
         assert charlie_gmail_search[0]['username'] == "charlie@email.com", "Wrong username for Charlie"
         print("  [PASS] Each user only sees their own gmail.com entry")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 1: Password isolation is perfect!")
-        print("="*60)
+        print("=" * 60)
 
         return temp_db  # Return for next test
 
@@ -135,11 +151,12 @@ def test_multiuser_password_isolation():
             os.remove(temp_db)
         raise
 
+
 def test_multiuser_portability(db_path):
     """Test portability with multiple users (database migration scenario)"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 2: Multi-User Portability (Database Migration)")
-    print("="*60)
+    print("=" * 60)
 
     try:
         # Simulate moving database to new computer - create new DB manager instance
@@ -174,7 +191,7 @@ def test_multiuser_portability(db_path):
         assert alice_count == 2, f"Alice should have 2 passwords, got {alice_count}"
         assert bob_count == 3, f"Bob should have 3 passwords, got {bob_count}"
         assert charlie_count == 1, f"Charlie should have 1 password, got {charlie_count}"
-        print(f"  [PASS] Password counts correct - Alice: 2, Bob: 3, Charlie: 1")
+        print("  [PASS] Password counts correct - Alice: 2, Bob: 3, Charlie: 1")
 
         # Verify passwords can still be decrypted after migration
         print("\n[*] Verifying passwords can be decrypted after migration...")
@@ -185,20 +202,21 @@ def test_multiuser_portability(db_path):
         assert decrypted == "alice_gmail_password", "Password decryption failed after migration"
         print("  [PASS] Passwords decrypt correctly after migration")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 2: Multi-user portability works perfectly!")
-        print("="*60)
+        print("=" * 60)
 
     finally:
         # Cleanup
         if os.path.exists(db_path):
             os.remove(db_path)
 
+
 def test_login_preference_with_multiple_users():
     """Test login preference validation with multiple users"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 3: Login Preference with Multiple Users")
-    print("="*60)
+    print("=" * 60)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
         temp_db = tmp.name
@@ -215,10 +233,10 @@ def test_login_preference_with_multiple_users():
 
         # Test user_exists for each user
         print("\n[*] Testing user_exists() for all users...")
-        assert db.user_exists("Alice") == True, "Alice should exist"
-        assert db.user_exists("Bob") == True, "Bob should exist"
-        assert db.user_exists("Charlie") == True, "Charlie should exist"
-        assert db.user_exists("David") == False, "David should NOT exist"
+        assert db.user_exists("Alice"), "Alice should exist"
+        assert db.user_exists("Bob"), "Bob should exist"
+        assert db.user_exists("Charlie"), "Charlie should exist"
+        assert db.user_exists("David") is False, "David should NOT exist"
         print("  [PASS] user_exists() correctly identifies all users")
 
         # Simulate login preference scenarios
@@ -232,13 +250,14 @@ def test_login_preference_with_multiple_users():
         if not db.user_exists("OldUserFromOtherPC"):
             print("  [PASS] OldUserFromOtherPC doesn't exist - would NOT pre-fill")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 3: Login preferences work with multiple users!")
-        print("="*60)
+        print("=" * 60)
 
     finally:
         if os.path.exists(temp_db):
             os.remove(temp_db)
+
 
 def main():
     """Run all multi-user tests"""
@@ -288,6 +307,7 @@ def main():
         import traceback
         traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     exit_code = main()

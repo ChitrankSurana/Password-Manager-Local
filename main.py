@@ -19,7 +19,7 @@ Features:
 
 Usage:
     python main.py [--gui|--web|--check-deps]
-    
+
     --gui        Launch GUI interface (default)
     --web        Launch web interface
     --check-deps Run dependency checker only
@@ -34,48 +34,49 @@ Author: Personal Password Manager
 Version: 2.2.0
 """
 
-import sys
-import os
 import argparse
+import sys
 from pathlib import Path
 
 # Add the src directory to Python path for imports
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
 
 def print_banner():
     """Print application banner and basic information"""
     banner = """
     ==============================================================
                    Personal Password Manager
-                        Version 2.2.0                          
-                                                                  
-    A secure, local password manager with modern GUI and       
-    web interfaces, featuring strong encryption and backup     
-    capabilities for personal use.                              
-                                                                  
-    * AES-256 Encryption  * Modern GUI  * Web Interface         
-    * Local Storage      * Password Gen  * Import/Export         
+                        Version 2.2.0
+
+    A secure, local password manager with modern GUI and
+    web interfaces, featuring strong encryption and backup
+    capabilities for personal use.
+
+    * AES-256 Encryption  * Modern GUI  * Web Interface
+    * Local Storage      * Password Gen  * Import/Export
     ==============================================================
     """
     print(banner)
 
+
 def check_dependencies():
     """
     Check if all required dependencies are installed
-    
+
     Returns:
         bool: True if all dependencies are satisfied, False otherwise
     """
     print("Checking dependencies...")
-    
+
     try:
         # Import dependency checker
         import check_dependencies
-        
+
         # Run the dependency check
         result = check_dependencies.main()
         return result == 0
-        
+
     except ImportError:
         print("[ERROR] Dependency checker not found!")
         return False
@@ -83,29 +84,30 @@ def check_dependencies():
         print(f"[ERROR] Error during dependency check: {e}")
         return False
 
+
 def setup_environment():
     """
     Set up the application environment and create necessary directories
-    
+
     Returns:
         bool: True if setup successful, False otherwise
     """
     try:
         # Ensure required directories exist
-        directories = ['data', 'backups', 'Code Explanations']
-        
+        directories = ["data", "backups", "Code Explanations"]
+
         for directory in directories:
             dir_path = Path(directory)
             if not dir_path.exists():
                 dir_path.mkdir(parents=True, exist_ok=True)
                 print(f"[OK] Created directory: {directory}")
-        
+
         # Check write permissions
         for directory in directories:
             dir_path = Path(directory)
-            test_file = dir_path / '.write_test'
+            test_file = dir_path / ".write_test"
             try:
-                test_file.write_text('test')
+                test_file.write_text("test")
                 test_file.unlink()
             except PermissionError:
                 print(f"[ERROR] No write permission for directory: {directory}")
@@ -113,48 +115,57 @@ def setup_environment():
             except Exception as e:
                 print(f"[ERROR] Permission check failed for {directory}: {e}")
                 return False
-        
+
         print("[OK] Environment setup complete")
         return True
-        
+
     except Exception as e:
         print(f"[ERROR] Environment setup failed: {e}")
         return False
 
+
 def launch_gui():
     """
     Launch the GUI interface
-    
+
     This function starts the main GUI application with CustomTkinter,
     featuring a modern Windows 11 style interface with dark mode support.
     """
     print("Starting GUI interface...")
-    
+
     try:
         # Import GUI modules
         import customtkinter as ctk
+
+        from src.core.auth import AuthenticationManager
+        from src.core.password_manager import PasswordManagerCore
+        from src.core.settings_service import create_settings_service
+        from src.gui.first_time_setup import FirstTimeSetupWizard
         from src.gui.login_window import LoginWindow
         from src.gui.main_window import MainWindow
         from src.gui.themes import setup_theme
-        from src.core.auth import AuthenticationManager
-        from src.core.password_manager import PasswordManagerCore
-        
+        from src.utils.font_manager import initialize_font_manager
+
         # Initialize theme system
         setup_theme()
-        
+
         # Create a hidden root window for proper Tkinter application structure
         root = ctk.CTk()
         root.withdraw()
-        
+
         # Initialize managers
         auth_manager = AuthenticationManager()
         password_manager = PasswordManagerCore(auth_manager=auth_manager)
+
+        # Initialize settings service (get database manager from password_manager)
+        settings_service = create_settings_service(password_manager.database_manager)
 
         main_window_ref = [None]  # Use list to allow modification in nested function
         login_window_ref = [None]  # Use list to allow modification in nested function
 
         def show_login_window():
             """Show the login window"""
+
             def on_login_success(session_id: str, username: str, master_password: str = None):
                 """Callback when login is successful"""
                 # Cache master password for convenience (if provided)
@@ -166,37 +177,85 @@ def launch_gui():
                     if login_window_ref[0]:
                         login_window_ref[0].destroy()
                         login_window_ref[0] = None
-                except:
+                except Exception:
                     pass
 
-                # Create main window with logout callback
-                def on_logout():
-                    """Callback when user logs out - reopen login window"""
-                    show_login_window()
+                # Get user ID from session
+                try:
+                    user_info = auth_manager.get_session_info(session_id)
+                    user_id = user_info.get("user_id") if user_info else None
+                except Exception:
+                    user_id = None
 
-                main_window = MainWindow(
-                    session_id=session_id,
-                    username=username,
-                    password_manager=password_manager,
-                    auth_manager=auth_manager,
-                    parent=root,
-                    on_logout_callback=on_logout
+                # Check if first-time setup is needed
+                first_time_setup_completed = (
+                    settings_service.get_user_setting(
+                        user_id, "ui_preferences", "first_time_setup_completed"
+                    )
+                    if user_id
+                    else True
                 )
-                main_window_ref[0] = main_window
 
-                # When main window is closed via X button, logout and quit
-                def on_main_window_close():
-                    try:
-                        auth_manager.logout_user(session_id)
-                    except:
-                        pass
-                    try:
-                        main_window.destroy()
-                    except:
-                        pass
-                    root.quit()
+                def create_main_window(font_size: str = None):
+                    """Create the main window after setup (if needed)"""
+                    # Initialize font manager with user's preference
+                    if font_size:
+                        initialize_font_manager(font_size)
+                    elif user_id:
+                        # Get font size from settings
+                        saved_font_size = settings_service.get_user_setting(
+                            user_id, "ui_preferences", "font_size"
+                        )
+                        initialize_font_manager(saved_font_size or "medium")
+                    else:
+                        initialize_font_manager("medium")
 
-                main_window.protocol("WM_DELETE_WINDOW", on_main_window_close)
+                    # Create main window with logout callback
+                    def on_logout():
+                        """Callback when user logs out - reopen login window"""
+                        show_login_window()
+
+                    main_window = MainWindow(
+                        session_id=session_id,
+                        username=username,
+                        password_manager=password_manager,
+                        auth_manager=auth_manager,
+                        parent=root,
+                        on_logout_callback=on_logout,
+                    )
+                    main_window_ref[0] = main_window
+
+                    # When main window is closed via X button, logout and quit
+                    def on_main_window_close():
+                        try:
+                            auth_manager.logout_user(session_id)
+                        except Exception:
+                            pass
+                        try:
+                            main_window.destroy()
+                        except Exception:
+                            pass
+                        root.quit()
+
+                    main_window.protocol("WM_DELETE_WINDOW", on_main_window_close)
+
+                # Show first-time setup wizard if needed
+                if not first_time_setup_completed and user_id:
+
+                    def on_setup_complete(font_size: str):
+                        """Callback when first-time setup completes"""
+                        create_main_window(font_size)
+
+                    # Show the first-time setup wizard
+                    FirstTimeSetupWizard(
+                        parent=root,
+                        user_id=user_id,
+                        settings_service=settings_service,
+                        on_complete_callback=on_setup_complete,
+                    )
+                else:
+                    # No first-time setup needed, go directly to main window
+                    create_main_window()
 
             def on_login_window_close():
                 """Handle login window close - quit application"""
@@ -209,10 +268,10 @@ def launch_gui():
 
         # Start by showing the login window
         show_login_window()
-        
+
         # Start the application
         root.mainloop()
-        
+
     except ImportError as e:
         print(f"[ERROR] GUI dependencies not found: {e}")
         print("Please run: python check_dependencies.py")
@@ -220,42 +279,43 @@ def launch_gui():
     except Exception as e:
         print(f"[ERROR] GUI startup failed: {e}")
         return False
-    
+
     return True
+
 
 def launch_web():
     """
     Launch the web interface
-    
+
     This function starts the Flask web server for browser-based access
     to the password manager.
     """
     print("Starting web interface...")
-    
+
     try:
         # Import web modules
         from src.web.app import create_app
-        
+
         # Create Flask application
         app = create_app()
-        
+
         # Configuration for development
-        app.config['DEBUG'] = False  # Set to False for production
-        app.config['HOST'] = '127.0.0.1'  # Localhost only for security
-        app.config['PORT'] = 5000
-        
+        app.config["DEBUG"] = False  # Set to False for production
+        app.config["HOST"] = "127.0.0.1"  # Localhost only for security
+        app.config["PORT"] = 5000
+
         print(f"Web interface starting at http://{app.config['HOST']}:{app.config['PORT']}")
         print("Access the password manager through your web browser")
         print("Press Ctrl+C to stop the server")
-        
+
         # Start the web server
         app.run(
-            host=app.config['HOST'],
-            port=app.config['PORT'],
-            debug=app.config['DEBUG'],
-            threaded=True
+            host=app.config["HOST"],
+            port=app.config["PORT"],
+            debug=app.config["DEBUG"],
+            threaded=True,
         )
-        
+
     except ImportError as e:
         print(f"[ERROR] Web dependencies not found: {e}")
         print("Please run: python check_dependencies.py")
@@ -263,8 +323,9 @@ def launch_web():
     except Exception as e:
         print(f"[ERROR] Web server startup failed: {e}")
         return False
-    
+
     return True
+
 
 def show_help():
     """Display help information"""
@@ -277,7 +338,7 @@ USAGE:
 
 OPTIONS:
     --gui        Launch GUI interface (default)
-    --web        Launch web interface  
+    --web        Launch web interface
     --check-deps Run dependency checker only
     --help       Show this help message
 
@@ -322,15 +383,16 @@ For more information, see README.md
     """
     print(help_text)
 
+
 def parse_arguments():
     """
     Parse command line arguments
-    
+
     Returns:
         argparse.Namespace: Parsed arguments
     """
     parser = argparse.ArgumentParser(
-        description='Personal Password Manager - Secure local password management',
+        description="Personal Password Manager - Secure local password management",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -340,89 +402,79 @@ Examples:
   python main.py --check-deps       Check dependencies only
 
 For more help: python main.py --help
-        """
+        """,
     )
-    
+
     # Create mutually exclusive group for interface options
     interface_group = parser.add_mutually_exclusive_group()
-    
+
     interface_group.add_argument(
-        '--gui', 
-        action='store_true',
-        help='Launch GUI interface (default)'
+        "--gui", action="store_true", help="Launch GUI interface (default)"
     )
-    
+
+    interface_group.add_argument("--web", action="store_true", help="Launch web interface")
+
     interface_group.add_argument(
-        '--web', 
-        action='store_true',
-        help='Launch web interface'
+        "--check-deps", action="store_true", help="Run dependency checker only"
     )
-    
-    interface_group.add_argument(
-        '--check-deps', 
-        action='store_true',
-        help='Run dependency checker only'
-    )
-    
+
     # Parse arguments
     args = parser.parse_args()
-    
+
     # If no interface specified, default to GUI
     if not any([args.gui, args.web, args.check_deps]):
         args.gui = True
-    
+
     return args
+
 
 def main():
     """
     Main application entry point
-    
+
     Handles command line arguments and starts the appropriate interface.
-    
+
     Returns:
         int: Exit code (0 for success, 1 for error)
     """
     try:
         # Parse command line arguments
         args = parse_arguments()
-        
+
         # Show banner (unless just checking dependencies)
         if not args.check_deps:
             print_banner()
-        
+
         # Handle dependency check only
         if args.check_deps:
             return 0 if check_dependencies() else 1
-        
+
         # Set up environment
         if not setup_environment():
             print("[ERROR] Environment setup failed. Please check permissions.")
             return 1
-        
+
         # Check dependencies before starting interfaces
         print("Performing quick dependency check...")
-        
+
         # Basic dependency check (faster than full check)
         try:
-            import customtkinter
-            import cryptography
-            import flask
             print("[OK] Core dependencies available")
         except ImportError as e:
             print(f"[ERROR] Missing core dependency: {e}")
             print("Please run: python main.py --check-deps")
             return 1
-        
+
         # Launch appropriate interface
         success = False
-        
+
         if args.gui:
             success = launch_gui()
         elif args.web:
             success = launch_web()
-        
+
         return 0 if success else 1
-        
+
     except KeyboardInterrupt:
         print("\n\nApplication interrupted by user. Goodbye!")
         return 0
@@ -430,6 +482,7 @@ def main():
         print(f"\n[ERROR] Unexpected error: {e}")
         print("For help, run: python main.py --help")
         return 1
+
 
 if __name__ == "__main__":
     # Set the exit code based on the main function result

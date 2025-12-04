@@ -4,27 +4,25 @@ Test script to verify the Edit Password functionality
 This script tests the newly implemented EditPasswordDialog
 """
 
-import sys
 import os
+import sys
 import tempfile
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+from core.password_manager import PasswordManagerCore
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from core.database import DatabaseManager
-from core.auth import AuthenticationManager
-from core.password_manager import PasswordManagerCore, PasswordEntry
-from core.encryption import PasswordEncryption
 
 def test_edit_password_backend():
     """Test the backend password edit functionality"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 1: Backend Password Edit Functionality")
-    print("="*60)
+    print("=" * 60)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
         temp_db = tmp.name
 
     try:
@@ -37,15 +35,14 @@ def test_edit_password_backend():
         password_manager = PasswordManagerCore(temp_db)
 
         # Create test user using the password manager's auth_manager
-        user_id = password_manager.auth_manager.create_user_account("testuser", "master_password_123")
+        user_id = password_manager.auth_manager.create_user_account(
+            "testuser", "master_password_123"
+        )
         print(f"  [PASS] Created test user (ID: {user_id})")
 
         # Authenticate and get session using the password manager's auth_manager
         session_id = password_manager.auth_manager.authenticate_user(
-            "testuser",
-            "master_password_123",
-            login_ip="127.0.0.1",
-            user_agent="Test Script"
+            "testuser", "master_password_123", login_ip="127.0.0.1", user_agent="Test Script"
         )
         print(f"  [PASS] User authenticated (Session: {session_id[:16]}...)")
 
@@ -56,7 +53,7 @@ def test_edit_password_backend():
             username="original_user",
             password="original_password_123",
             remarks="Original remarks",
-            master_password="master_password_123"  # Provide master password for encryption
+            master_password="master_password_123",  # Provide master password for encryption
         )
         print(f"  [PASS] Created password entry (ID: {entry_id})")
 
@@ -65,14 +62,14 @@ def test_edit_password_backend():
         # ====================================================================
         print("\n[*] Test 1A: Editing website only...")
         success = password_manager.update_password_entry(
-            session_id=session_id,
-            entry_id=entry_id,
-            website="gitlab.com"  # Only change website
+            session_id=session_id, entry_id=entry_id, website="gitlab.com"  # Only change website
         )
-        assert success == True, "Update should succeed"
+        assert success, "Update should succeed"
 
         # Verify change
-        entries = password_manager.search_password_entries(session_id, master_password="master_password_123", include_passwords=True)
+        entries = password_manager.search_password_entries(
+            session_id, master_password="master_password_123", include_passwords=True
+        )
         updated_entry = [e for e in entries if e.entry_id == entry_id][0]
         assert updated_entry.website == "gitlab.com", "Website should be updated"
         assert updated_entry.username == "original_user", "Username should remain unchanged"
@@ -83,14 +80,14 @@ def test_edit_password_backend():
         # ====================================================================
         print("\n[*] Test 1B: Editing username only...")
         success = password_manager.update_password_entry(
-            session_id=session_id,
-            entry_id=entry_id,
-            username="new_username"
+            session_id=session_id, entry_id=entry_id, username="new_username"
         )
-        assert success == True, "Update should succeed"
+        assert success, "Update should succeed"
 
         # Verify change
-        entries = password_manager.search_password_entries(session_id, master_password="master_password_123", include_passwords=True)
+        entries = password_manager.search_password_entries(
+            session_id, master_password="master_password_123", include_passwords=True
+        )
         updated_entry = [e for e in entries if e.entry_id == entry_id][0]
         assert updated_entry.username == "new_username", "Username should be updated"
         assert updated_entry.website == "gitlab.com", "Website should remain unchanged"
@@ -101,16 +98,18 @@ def test_edit_password_backend():
         # ====================================================================
         print("\n[*] Test 1C: Editing password (re-encryption test)...")
         success = password_manager.update_password_entry(
-            session_id=session_id,
-            entry_id=entry_id,
-            password="new_secure_password_456"
+            session_id=session_id, entry_id=entry_id, password="new_secure_password_456"
         )
-        assert success == True, "Password update should succeed"
+        assert success, "Password update should succeed"
 
         # Verify password can be decrypted correctly
-        entries = password_manager.search_password_entries(session_id, master_password="master_password_123", include_passwords=True)
+        entries = password_manager.search_password_entries(
+            session_id, master_password="master_password_123", include_passwords=True
+        )
         updated_entry = [e for e in entries if e.entry_id == entry_id][0]
-        assert updated_entry.password == "new_secure_password_456", "Password should be decrypted correctly"
+        assert (
+            updated_entry.password == "new_secure_password_456"
+        ), "Password should be decrypted correctly"
         print("  [PASS] Password updated and re-encrypted successfully")
 
         # ====================================================================
@@ -118,16 +117,18 @@ def test_edit_password_backend():
         # ====================================================================
         print("\n[*] Test 1D: Editing remarks...")
         success = password_manager.update_password_entry(
-            session_id=session_id,
-            entry_id=entry_id,
-            remarks="Updated remarks with new information"
+            session_id=session_id, entry_id=entry_id, remarks="Updated remarks with new information"
         )
-        assert success == True, "Remarks update should succeed"
+        assert success, "Remarks update should succeed"
 
         # Verify change
-        entries = password_manager.search_password_entries(session_id, master_password="master_password_123", include_passwords=True)
+        entries = password_manager.search_password_entries(
+            session_id, master_password="master_password_123", include_passwords=True
+        )
         updated_entry = [e for e in entries if e.entry_id == entry_id][0]
-        assert updated_entry.remarks == "Updated remarks with new information", "Remarks should be updated"
+        assert (
+            updated_entry.remarks == "Updated remarks with new information"
+        ), "Remarks should be updated"
         print("  [PASS] Remarks updated successfully")
 
         # ====================================================================
@@ -137,27 +138,27 @@ def test_edit_password_backend():
 
         # Set as favorite
         success = password_manager.update_password_entry(
-            session_id=session_id,
-            entry_id=entry_id,
-            is_favorite=True
+            session_id=session_id, entry_id=entry_id, is_favorite=True
         )
-        assert success == True, "Favorite update should succeed"
+        assert success, "Favorite update should succeed"
 
-        entries = password_manager.search_password_entries(session_id, master_password="master_password_123", include_passwords=True)
+        entries = password_manager.search_password_entries(
+            session_id, master_password="master_password_123", include_passwords=True
+        )
         updated_entry = [e for e in entries if e.entry_id == entry_id][0]
-        assert updated_entry.is_favorite == True, "Should be marked as favorite"
+        assert updated_entry.is_favorite, "Should be marked as favorite"
         print("  [PASS] Marked as favorite")
 
         # Unset favorite
         success = password_manager.update_password_entry(
-            session_id=session_id,
-            entry_id=entry_id,
-            is_favorite=False
+            session_id=session_id, entry_id=entry_id, is_favorite=False
         )
 
-        entries = password_manager.search_password_entries(session_id, master_password="master_password_123", include_passwords=True)
+        entries = password_manager.search_password_entries(
+            session_id, master_password="master_password_123", include_passwords=True
+        )
         updated_entry = [e for e in entries if e.entry_id == entry_id][0]
-        assert updated_entry.is_favorite == False, "Should not be favorite"
+        assert updated_entry.is_favorite is False, "Should not be favorite"
         print("  [PASS] Removed from favorites")
 
         # ====================================================================
@@ -171,19 +172,21 @@ def test_edit_password_backend():
             username="multi_edit_user",
             password="multi_edit_password",
             remarks="All fields edited",
-            is_favorite=True
+            is_favorite=True,
         )
-        assert success == True, "Multi-field update should succeed"
+        assert success, "Multi-field update should succeed"
 
         # Verify all changes
-        entries = password_manager.search_password_entries(session_id, master_password="master_password_123", include_passwords=True)
+        entries = password_manager.search_password_entries(
+            session_id, master_password="master_password_123", include_passwords=True
+        )
         updated_entry = [e for e in entries if e.entry_id == entry_id][0]
 
         assert updated_entry.website == "example.com", "Website should be updated"
         assert updated_entry.username == "multi_edit_user", "Username should be updated"
         assert updated_entry.password == "multi_edit_password", "Password should be updated"
         assert updated_entry.remarks == "All fields edited", "Remarks should be updated"
-        assert updated_entry.is_favorite == True, "Should be favorite"
+        assert updated_entry.is_favorite, "Should be favorite"
         print("  [PASS] All fields updated successfully")
 
         # ====================================================================
@@ -196,22 +199,23 @@ def test_edit_password_backend():
 
         # Wait a moment and make another update
         import time
+
         time.sleep(1)
 
         success = password_manager.update_password_entry(
-            session_id=session_id,
-            entry_id=entry_id,
-            remarks="Timestamp test"
+            session_id=session_id, entry_id=entry_id, remarks="Timestamp test"
         )
 
         # Check if modified timestamp changed
-        entries = password_manager.search_password_entries(session_id, master_password="master_password_123", include_passwords=True)
+        entries = password_manager.search_password_entries(
+            session_id, master_password="master_password_123", include_passwords=True
+        )
         updated_entry = [e for e in entries if e.entry_id == entry_id][0]
 
         # Modified timestamp should be different (more recent)
         if isinstance(original_modified, str):
-            original_dt = datetime.fromisoformat(original_modified.replace('Z', '+00:00'))
-            new_dt = datetime.fromisoformat(updated_entry.modified_at.replace('Z', '+00:00'))
+            original_dt = datetime.fromisoformat(original_modified.replace("Z", "+00:00"))
+            new_dt = datetime.fromisoformat(updated_entry.modified_at.replace("Z", "+00:00"))
         else:
             original_dt = original_modified
             new_dt = updated_entry.modified_at
@@ -219,9 +223,9 @@ def test_edit_password_backend():
         assert new_dt > original_dt, "Modified timestamp should be updated"
         print("  [PASS] Modified timestamp updated correctly")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 1: All backend edit tests passed!")
-        print("="*60)
+        print("=" * 60)
 
         return True
 
@@ -229,13 +233,14 @@ def test_edit_password_backend():
         if os.path.exists(temp_db):
             os.remove(temp_db)
 
+
 def test_edit_password_multi_user():
     """Test that users can only edit their own passwords"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 2: Multi-User Edit Security")
-    print("="*60)
+    print("=" * 60)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
         temp_db = tmp.name
 
     try:
@@ -260,7 +265,7 @@ def test_edit_password_multi_user():
             username="alice_user",
             password="alice_password",
             remarks="Alice's entry",
-            master_password="alice_master_123"
+            master_password="alice_master_123",
         )
         print(f"  [PASS] Alice created entry (ID: {alice_entry_id})")
 
@@ -271,7 +276,7 @@ def test_edit_password_multi_user():
             username="bob_user",
             password="bob_password",
             remarks="Bob's entry",
-            master_password="bob_master_456"
+            master_password="bob_master_456",
         )
         print(f"  [PASS] Bob created entry (ID: {bob_entry_id})")
 
@@ -280,11 +285,9 @@ def test_edit_password_multi_user():
         # ====================================================================
         print("\n[*] Test 2A: Alice editing her own password...")
         success = password_manager.update_password_entry(
-            session_id=alice_session,
-            entry_id=alice_entry_id,
-            website="alice-updated.com"
+            session_id=alice_session, entry_id=alice_entry_id, website="alice-updated.com"
         )
-        assert success == True, "Alice should be able to edit her own password"
+        assert success, "Alice should be able to edit her own password"
         print("  [PASS] Alice can edit her own entry")
 
         # ====================================================================
@@ -298,17 +301,21 @@ def test_edit_password_multi_user():
             password_manager.update_password_entry(
                 session_id=bob_session,
                 entry_id=alice_entry_id,  # Alice's entry
-                website="bob-hacked.com"
+                website="bob-hacked.com",
             )
         except Exception as e:
             # Exception is expected - security is working
             edit_blocked = True
-            assert "does not own" in str(e).lower() or "failed" in str(e).lower(), "Should get ownership error"
+            assert (
+                "does not own" in str(e).lower() or "failed" in str(e).lower()
+            ), "Should get ownership error"
 
-        assert edit_blocked == True, "Bob's edit attempt should be blocked"
+        assert edit_blocked, "Bob's edit attempt should be blocked"
 
         # Verify Alice's entry is unchanged
-        alice_entries = password_manager.search_password_entries(alice_session, master_password="alice_master_123", include_passwords=True)
+        alice_entries = password_manager.search_password_entries(
+            alice_session, master_password="alice_master_123", include_passwords=True
+        )
         alice_entry = [e for e in alice_entries if e.entry_id == alice_entry_id][0]
         assert alice_entry.website == "alice-updated.com", "Alice's entry should remain unchanged"
         print("  [PASS] Bob cannot edit Alice's entry (security enforced)")
@@ -317,8 +324,12 @@ def test_edit_password_multi_user():
         # Test: Verify each user only sees their own entries
         # ====================================================================
         print("\n[*] Test 2C: Verifying entry isolation...")
-        alice_entries = password_manager.search_password_entries(alice_session, master_password="alice_master_123", include_passwords=True)
-        bob_entries = password_manager.search_password_entries(bob_session, master_password="bob_master_456", include_passwords=True)
+        alice_entries = password_manager.search_password_entries(
+            alice_session, master_password="alice_master_123", include_passwords=True
+        )
+        bob_entries = password_manager.search_password_entries(
+            bob_session, master_password="bob_master_456", include_passwords=True
+        )
 
         assert len(alice_entries) == 1, "Alice should have 1 entry"
         assert len(bob_entries) == 1, "Bob should have 1 entry"
@@ -326,15 +337,16 @@ def test_edit_password_multi_user():
         assert bob_entries[0].website == "bob-site.com", "Bob sees his entry"
         print("  [PASS] Entry isolation verified")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 2: Multi-user security tests passed!")
-        print("="*60)
+        print("=" * 60)
 
         return True
 
     finally:
         if os.path.exists(temp_db):
             os.remove(temp_db)
+
 
 def main():
     """Run all edit functionality tests"""
@@ -379,13 +391,16 @@ def main():
     except AssertionError as e:
         print(f"\n[FAIL] TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
     except Exception as e:
         print(f"\n[ERROR] UNEXPECTED ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     exit_code = main()

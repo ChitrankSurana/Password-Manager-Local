@@ -4,25 +4,24 @@ Test script for password entry deletion functionality
 Tests the newly implemented delete feature with proper confirmation
 """
 
-import sys
 import os
+import sys
 import tempfile
 from pathlib import Path
+
+from core.password_manager import PasswordManagerCore
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from core.database import DatabaseManager
-from core.auth import AuthenticationManager
-from core.password_manager import PasswordManagerCore
 
 def test_delete_password_backend():
     """Test the backend password deletion functionality"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 1: Backend Password Deletion")
-    print("="*60)
+    print("=" * 60)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
         temp_db = tmp.name
 
     try:
@@ -31,12 +30,16 @@ def test_delete_password_backend():
         password_manager = PasswordManagerCore(temp_db)
 
         # Create test user
-        user_id = password_manager.auth_manager.create_user_account("testuser", "master_password_123")
+        user_id = password_manager.auth_manager.create_user_account(
+            "testuser", "master_password_123"
+        )
         print(f"  [PASS] Created test user (ID: {user_id})")
 
         # Authenticate
-        session_id = password_manager.auth_manager.authenticate_user("testuser", "master_password_123")
-        print(f"  [PASS] User authenticated")
+        session_id = password_manager.auth_manager.authenticate_user(
+            "testuser", "master_password_123"
+        )
+        print("  [PASS] User authenticated")
 
         # Add password entries
         entry1_id = password_manager.add_password_entry(
@@ -45,7 +48,7 @@ def test_delete_password_backend():
             username="user@example.com",
             password="password123",
             remarks="Test entry 1",
-            master_password="master_password_123"
+            master_password="master_password_123",
         )
         print(f"  [PASS] Created entry 1 (ID: {entry1_id})")
 
@@ -55,7 +58,7 @@ def test_delete_password_backend():
             username="testuser",
             password="testpass456",
             remarks="Test entry 2",
-            master_password="master_password_123"
+            master_password="master_password_123",
         )
         print(f"  [PASS] Created entry 2 (ID: {entry2_id})")
 
@@ -64,8 +67,7 @@ def test_delete_password_backend():
         # ====================================================================
         print("\n[*] Test 1A: Verify entries exist...")
         entries = password_manager.search_password_entries(
-            session_id=session_id,
-            include_passwords=False
+            session_id=session_id, include_passwords=False
         )
         assert len(entries) == 2, f"Should have 2 entries, got {len(entries)}"
         print("  [PASS] Both entries exist")
@@ -74,11 +76,8 @@ def test_delete_password_backend():
         # Test 1B: Delete first entry
         # ====================================================================
         print("\n[*] Test 1B: Delete first entry...")
-        success = password_manager.delete_password_entry(
-            session_id=session_id,
-            entry_id=entry1_id
-        )
-        assert success == True, "Deletion should succeed"
+        success = password_manager.delete_password_entry(session_id=session_id, entry_id=entry1_id)
+        assert success, "Deletion should succeed"
         print("  [PASS] Entry 1 deleted successfully")
 
         # ====================================================================
@@ -86,8 +85,7 @@ def test_delete_password_backend():
         # ====================================================================
         print("\n[*] Test 1C: Verify only one entry remains...")
         entries = password_manager.search_password_entries(
-            session_id=session_id,
-            include_passwords=False
+            session_id=session_id, include_passwords=False
         )
         assert len(entries) == 1, f"Should have 1 entry left, got {len(entries)}"
         assert entries[0].entry_id == entry2_id, "Remaining entry should be entry 2"
@@ -98,22 +96,16 @@ def test_delete_password_backend():
         # Test 1D: Try to delete already deleted entry (should fail gracefully)
         # ====================================================================
         print("\n[*] Test 1D: Try to delete already deleted entry...")
-        success = password_manager.delete_password_entry(
-            session_id=session_id,
-            entry_id=entry1_id
-        )
-        assert success == False, "Deleting non-existent entry should return False"
+        success = password_manager.delete_password_entry(session_id=session_id, entry_id=entry1_id)
+        assert success is False, "Deleting non-existent entry should return False"
         print("  [PASS] Deletion of non-existent entry handled correctly")
 
         # ====================================================================
         # Test 1E: Delete remaining entry
         # ====================================================================
         print("\n[*] Test 1E: Delete remaining entry...")
-        success = password_manager.delete_password_entry(
-            session_id=session_id,
-            entry_id=entry2_id
-        )
-        assert success == True, "Deletion should succeed"
+        success = password_manager.delete_password_entry(session_id=session_id, entry_id=entry2_id)
+        assert success, "Deletion should succeed"
         print("  [PASS] Entry 2 deleted successfully")
 
         # ====================================================================
@@ -121,15 +113,14 @@ def test_delete_password_backend():
         # ====================================================================
         print("\n[*] Test 1F: Verify no entries remain...")
         entries = password_manager.search_password_entries(
-            session_id=session_id,
-            include_passwords=False
+            session_id=session_id, include_passwords=False
         )
         assert len(entries) == 0, f"Should have 0 entries, got {len(entries)}"
         print("  [PASS] All entries deleted")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 1: Deletion functionality works!")
-        print("="*60)
+        print("=" * 60)
 
         return True
 
@@ -137,13 +128,14 @@ def test_delete_password_backend():
         if os.path.exists(temp_db):
             os.remove(temp_db)
 
+
 def test_multi_user_deletion_isolation():
     """Test that users can only delete their own entries"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 2: Multi-User Deletion Security")
-    print("="*60)
+    print("=" * 60)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
         temp_db = tmp.name
 
     try:
@@ -157,7 +149,9 @@ def test_multi_user_deletion_isolation():
         print(f"  [PASS] Created users Alice (ID: {user1_id}) and Bob (ID: {user2_id})")
 
         # Authenticate both users
-        alice_session = password_manager.auth_manager.authenticate_user("alice", "alice_password_123")
+        alice_session = password_manager.auth_manager.authenticate_user(
+            "alice", "alice_password_123"
+        )
         bob_session = password_manager.auth_manager.authenticate_user("bob", "bob_password_456")
         print("  [PASS] Both users authenticated")
 
@@ -168,7 +162,7 @@ def test_multi_user_deletion_isolation():
             username="alice_user",
             password="alice_password",
             remarks="Alice's entry",
-            master_password="alice_password_123"
+            master_password="alice_password_123",
         )
         print(f"  [PASS] Alice created entry (ID: {alice_entry_id})")
 
@@ -179,7 +173,7 @@ def test_multi_user_deletion_isolation():
             username="bob_user",
             password="bob_password",
             remarks="Bob's entry",
-            master_password="bob_password_456"
+            master_password="bob_password_456",
         )
         print(f"  [PASS] Bob created entry (ID: {bob_entry_id})")
 
@@ -188,10 +182,9 @@ def test_multi_user_deletion_isolation():
         # ====================================================================
         print("\n[*] Test 2A: Alice deleting her own entry...")
         success = password_manager.delete_password_entry(
-            session_id=alice_session,
-            entry_id=alice_entry_id
+            session_id=alice_session, entry_id=alice_entry_id
         )
-        assert success == True, "Alice should be able to delete her own entry"
+        assert success, "Alice should be able to delete her own entry"
         print("  [PASS] Alice can delete her own entry")
 
         # ====================================================================
@@ -206,7 +199,7 @@ def test_multi_user_deletion_isolation():
             username="alice_user2",
             password="alice_password2",
             remarks="Alice's second entry",
-            master_password="alice_password_123"
+            master_password="alice_password_123",
         )
 
         # Bob tries to delete Alice's entry (should raise exception for security)
@@ -214,37 +207,35 @@ def test_multi_user_deletion_isolation():
 
         deletion_blocked = False
         try:
-            password_manager.delete_password_entry(
-                session_id=bob_session,
-                entry_id=alice_entry2_id
-            )
+            password_manager.delete_password_entry(session_id=bob_session, entry_id=alice_entry2_id)
         except PasswordManagerError as e:
             # Exception is expected - security is working
             deletion_blocked = True
-            assert "does not own" in str(e).lower() or "deletion failed" in str(e).lower(), \
-                "Should get ownership error"
+            assert (
+                "does not own" in str(e).lower() or "deletion failed" in str(e).lower()
+            ), "Should get ownership error"
 
-        assert deletion_blocked == True, "Bob's deletion attempt should be blocked"
+        assert deletion_blocked, "Bob's deletion attempt should be blocked"
         print("  [PASS] Bob cannot delete Alice's entry (security enforced)")
 
         # Verify Alice's entry still exists
         alice_entries = password_manager.search_password_entries(
-            alice_session,
-            include_passwords=False
+            alice_session, include_passwords=False
         )
         assert len(alice_entries) == 1, "Alice's entry should still exist"
         assert alice_entries[0].entry_id == alice_entry2_id, "Should be Alice's second entry"
         print("  [PASS] Alice's entry remains intact")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 2: Multi-user deletion security works!")
-        print("="*60)
+        print("=" * 60)
 
         return True
 
     finally:
         if os.path.exists(temp_db):
             os.remove(temp_db)
+
 
 def main():
     """Run all delete functionality tests"""
@@ -295,13 +286,16 @@ def main():
     except AssertionError as e:
         print(f"\n[FAIL] TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
     except Exception as e:
         print(f"\n[ERROR] UNEXPECTED ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     exit_code = main()

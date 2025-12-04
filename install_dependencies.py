@@ -17,15 +17,15 @@ Features:
 Usage: python install_dependencies.py
 """
 
-import sys
-import os
-import subprocess
 import platform
+import subprocess
+import sys
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple
 
 # Minimum Python version required
 MIN_PYTHON_VERSION = (3, 8)
+
 
 def print_header(message: str) -> None:
     """Print a formatted header"""
@@ -34,21 +34,26 @@ def print_header(message: str) -> None:
     print(f"  {message}")
     print(f"{separator}\n")
 
+
 def print_step(message: str) -> None:
     """Print a step message"""
     print(f"[STEP] {message}")
+
 
 def print_success(message: str) -> None:
     """Print a success message"""
     print(f"[OK] {message}")
 
+
 def print_error(message: str) -> None:
     """Print an error message"""
     print(f"[ERROR] {message}")
 
+
 def print_warning(message: str) -> None:
     """Print a warning message"""
     print(f"[WARNING] {message}")
+
 
 def check_python_version() -> bool:
     """
@@ -70,8 +75,9 @@ def check_python_version() -> bool:
         return True
     else:
         print_error(f"Python {required[0]}.{required[1]}+ is required")
-        print_error(f"Please upgrade from https://www.python.org/downloads/")
+        print_error("Please upgrade from https://www.python.org/downloads/")
         return False
+
 
 def check_pip() -> bool:
     """
@@ -84,10 +90,7 @@ def check_pip() -> bool:
 
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10
+            [sys.executable, "-m", "pip", "--version"], capture_output=True, text=True, timeout=10
         )
 
         if result.returncode == 0:
@@ -103,6 +106,7 @@ def check_pip() -> bool:
         print_error("Install pip from: https://pip.pypa.io/en/stable/installation/")
         return False
 
+
 def upgrade_pip() -> bool:
     """
     Upgrade pip to latest version
@@ -117,7 +121,7 @@ def upgrade_pip() -> bool:
             [sys.executable, "-m", "pip", "install", "--upgrade", "pip"],
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=120,
         )
 
         if result.returncode == 0:
@@ -130,6 +134,7 @@ def upgrade_pip() -> bool:
     except Exception as e:
         print_warning(f"pip upgrade failed: {e}, continuing anyway")
         return True  # Non-critical
+
 
 def parse_requirements() -> List[str]:
     """
@@ -149,17 +154,17 @@ def parse_requirements() -> List[str]:
     packages = []
 
     try:
-        with open(requirements_file, 'r', encoding='utf-8') as f:
+        with open(requirements_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
 
                 # Skip comments and empty lines
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
 
                 # Remove inline comments
-                if '#' in line:
-                    line = line.split('#')[0].strip()
+                if "#" in line:
+                    line = line.split("#")[0].strip()
 
                 if line:
                     packages.append(line)
@@ -170,6 +175,7 @@ def parse_requirements() -> List[str]:
     except Exception as e:
         print_error(f"Failed to read requirements.txt: {e}")
         return []
+
 
 def check_package_installed(package_spec: str) -> Tuple[bool, str]:
     """
@@ -183,7 +189,7 @@ def check_package_installed(package_spec: str) -> Tuple[bool, str]:
     """
     # Extract package name from spec
     package_name = package_spec
-    for separator in ['>=', '==', '<=', '>', '<', '~=']:
+    for separator in [">=", "==", "<=", ">", "<", "~="]:
         if separator in package_name:
             package_name = package_name.split(separator)[0].strip()
             break
@@ -193,13 +199,14 @@ def check_package_installed(package_spec: str) -> Tuple[bool, str]:
             [sys.executable, "-m", "pip", "show", package_name],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
         )
 
         return result.returncode == 0, package_name
 
     except Exception:
         return False, package_name
+
 
 def install_package(package_spec: str) -> bool:
     """
@@ -218,7 +225,7 @@ def install_package(package_spec: str) -> bool:
             [sys.executable, "-m", "pip", "install", package_spec],
             capture_output=True,
             text=True,
-            timeout=300  # 5 minutes timeout per package
+            timeout=300,  # 5 minutes timeout per package
         )
 
         if result.returncode == 0:
@@ -236,6 +243,7 @@ def install_package(package_spec: str) -> bool:
     except Exception as e:
         print_error(f"Installation error for {package_spec}: {e}")
         return False
+
 
 def install_all_dependencies() -> Tuple[int, int, int]:
     """
@@ -293,6 +301,7 @@ def install_all_dependencies() -> Tuple[int, int, int]:
 
     return total, already_installed, newly_installed
 
+
 def create_required_directories() -> bool:
     """
     Create required application directories
@@ -302,12 +311,7 @@ def create_required_directories() -> bool:
     """
     print_step("Creating required directories...")
 
-    directories = [
-        "data",
-        "backups",
-        "Code Explanations",
-        "logs"
-    ]
+    directories = ["data", "backups", "Code Explanations", "logs"]
 
     success = True
 
@@ -325,6 +329,7 @@ def create_required_directories() -> bool:
 
     return success
 
+
 def verify_installation() -> bool:
     """
     Verify critical packages can be imported
@@ -335,13 +340,13 @@ def verify_installation() -> bool:
     print_step("Verifying critical package imports...")
 
     critical_imports = {
-        'cryptography': 'cryptography.fernet',
-        'bcrypt': 'bcrypt',
-        'customtkinter': 'customtkinter',
-        'PIL': 'PIL',
-        'pyperclip': 'pyperclip',
-        'zxcvbn': 'zxcvbn',
-        'flask': 'flask',
+        "cryptography": "cryptography.fernet",
+        "bcrypt": "bcrypt",
+        "customtkinter": "customtkinter",
+        "PIL": "PIL",
+        "pyperclip": "pyperclip",
+        "zxcvbn": "zxcvbn",
+        "flask": "flask",
     }
 
     success = True
@@ -360,6 +365,7 @@ def verify_installation() -> bool:
         print_error("Some critical packages failed to import")
 
     return success
+
 
 def main() -> int:
     """
@@ -430,6 +436,7 @@ def main() -> int:
         print("\nFor detailed diagnostics.")
         return 1
 
+
 if __name__ == "__main__":
     try:
         exit_code = main()
@@ -442,7 +449,7 @@ if __name__ == "__main__":
 
         try:
             input()
-        except:
+        except Exception:
             pass
 
         sys.exit(exit_code)
@@ -453,5 +460,6 @@ if __name__ == "__main__":
     except Exception as e:
         print_error(f"\nUnexpected error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

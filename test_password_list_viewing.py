@@ -5,25 +5,24 @@ Tests the newly implemented master password verification and timed viewing
 for PasswordEntryWidget (the main password list view)
 """
 
-import sys
 import os
+import sys
 import tempfile
 from pathlib import Path
+
+from core.password_manager import PasswordManagerCore
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from core.database import DatabaseManager
-from core.auth import AuthenticationManager
-from core.password_manager import PasswordManagerCore
 
 def test_password_list_viewing_backend():
     """Test the backend functionality for password list viewing"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 1: Password List Viewing Backend")
-    print("="*60)
+    print("=" * 60)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
         temp_db = tmp.name
 
     try:
@@ -32,19 +31,23 @@ def test_password_list_viewing_backend():
         password_manager = PasswordManagerCore(temp_db)
 
         # Create test user
-        user_id = password_manager.auth_manager.create_user_account("testuser", "master_password_123")
+        user_id = password_manager.auth_manager.create_user_account(
+            "testuser", "master_password_123"
+        )
         print(f"  [PASS] Created test user (ID: {user_id})")
 
         # Authenticate
-        session_id = password_manager.auth_manager.authenticate_user("testuser", "master_password_123")
-        print(f"  [PASS] User authenticated")
+        session_id = password_manager.auth_manager.authenticate_user(
+            "testuser", "master_password_123"
+        )
+        print("  [PASS] User authenticated")
 
         # Add multiple password entries
         entries = []
         test_passwords = [
             ("google.com", "user@gmail.com", "google_password_123", "Google account"),
             ("facebook.com", "user@fb.com", "facebook_password_456", "Social media"),
-            ("github.com", "developer", "github_password_789", "Code repository")
+            ("github.com", "developer", "github_password_789", "Code repository"),
         ]
 
         print("\n[*] Adding test password entries...")
@@ -55,7 +58,7 @@ def test_password_list_viewing_backend():
                 username=username,
                 password=password,
                 remarks=remarks,
-                master_password="master_password_123"
+                master_password="master_password_123",
             )
             entries.append(entry_id)
             print(f"  [PASS] Created entry for {website} (ID: {entry_id})")
@@ -65,15 +68,16 @@ def test_password_list_viewing_backend():
         # ====================================================================
         print("\n[*] Test 1A: List entries without passwords (secure default)...")
         entries_list = password_manager.search_password_entries(
-            session_id=session_id,
-            include_passwords=False  # Default secure mode
+            session_id=session_id, include_passwords=False  # Default secure mode
         )
         assert len(entries_list) == 3, f"Should have 3 entries, got {len(entries_list)}"
 
         # Verify passwords are NOT included
         for entry in entries_list:
             # In secure mode, password should be None or empty
-            assert entry.password is None or entry.password == "", "Passwords should not be included in list view by default"
+            assert (
+                entry.password is None or entry.password == ""
+            ), "Passwords should not be included in list view by default"
         print("  [PASS] Entries retrieved without passwords (secure)")
 
         # ====================================================================
@@ -82,9 +86,7 @@ def test_password_list_viewing_backend():
         print("\n[*] Test 1B: Retrieve single entry with password (for viewing)...")
         google_entry_id = entries[0]
         entry = password_manager.get_password_entry(
-            session_id=session_id,
-            entry_id=google_entry_id,
-            master_password="master_password_123"
+            session_id=session_id, entry_id=google_entry_id, master_password="master_password_123"
         )
         assert entry is not None, "Should retrieve entry"
         assert entry.password == "google_password_123", "Password should decrypt correctly"
@@ -94,12 +96,16 @@ def test_password_list_viewing_backend():
         # Test: Verify master password before viewing
         # ====================================================================
         print("\n[*] Test 1C: Verify master password before viewing...")
-        user_data = password_manager.auth_manager.db_manager.authenticate_user("testuser", "master_password_123")
+        user_data = password_manager.auth_manager.db_manager.authenticate_user(
+            "testuser", "master_password_123"
+        )
         assert user_data is not None, "Correct password should authenticate"
         print("  [PASS] Master password verified successfully")
 
         # Try with wrong password
-        user_data = password_manager.auth_manager.db_manager.authenticate_user("testuser", "wrong_password")
+        user_data = password_manager.auth_manager.db_manager.authenticate_user(
+            "testuser", "wrong_password"
+        )
         assert user_data is None, "Wrong password should not authenticate"
         print("  [PASS] Incorrect password rejected")
 
@@ -110,8 +116,7 @@ def test_password_list_viewing_backend():
 
         # Step 1: User sees list without passwords
         entries_list = password_manager.search_password_entries(
-            session_id=session_id,
-            include_passwords=False
+            session_id=session_id, include_passwords=False
         )
         print(f"  Step 1: User sees {len(entries_list)} entries (passwords hidden)")
 
@@ -121,17 +126,14 @@ def test_password_list_viewing_backend():
         # Step 3: System prompts for master password
         print("  Step 3: System prompts for master password")
         master_verified = password_manager.auth_manager.db_manager.authenticate_user(
-            "testuser",
-            "master_password_123"
+            "testuser", "master_password_123"
         )
         assert master_verified is not None, "Master password verification should succeed"
         print("  Step 4: Master password verified")
 
         # Step 5: Retrieve password for viewing
         entry_to_view = password_manager.get_password_entry(
-            session_id=session_id,
-            entry_id=google_entry_id,
-            master_password="master_password_123"
+            session_id=session_id, entry_id=google_entry_id, master_password="master_password_123"
         )
         print(f"  Step 5: Password retrieved: {entry_to_view.password}")
 
@@ -140,9 +142,9 @@ def test_password_list_viewing_backend():
 
         print("  [PASS] Complete viewing workflow simulated successfully")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("[PASS] TEST 1: Password list viewing backend works!")
-        print("="*60)
+        print("=" * 60)
 
         return True
 
@@ -150,11 +152,12 @@ def test_password_list_viewing_backend():
         if os.path.exists(temp_db):
             os.remove(temp_db)
 
+
 def test_gui_integration_checklist():
     """Checklist for GUI testing (manual)"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 2: GUI Integration Checklist (Manual Testing Required)")
-    print("="*60)
+    print("=" * 60)
 
     print("\n[INFO] The password list viewing feature has been implemented.")
     print("       To fully test the feature, run the application and verify:\n")
@@ -189,17 +192,18 @@ def test_gui_integration_checklist():
         "23. View password, then search for different entry",
         "24. VERIFY: Timer cleanup prevents memory leaks",
         "25. View password in one entry, then view in another",
-        "26. VERIFY: Each entry has independent timer"
+        "26. VERIFY: Each entry has independent timer",
     ]
 
     for item in checklist:
         print(f"  {item}")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("[INFO] TEST 2: Please perform manual GUI testing")
-    print("="*60)
+    print("=" * 60)
 
     return True
+
 
 def main():
     """Run all password list viewing tests"""
@@ -270,13 +274,16 @@ def main():
     except AssertionError as e:
         print(f"\n[FAIL] TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
     except Exception as e:
         print(f"\n[ERROR] UNEXPECTED ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     exit_code = main()

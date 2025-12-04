@@ -16,6 +16,7 @@ pillow>=10.0.0                 # Image processing for GUI icons and themes
 pyperclip>=1.8.0              # Clipboard operations for copy/paste functionality
 zxcvbn>=4.4.28                # Advanced password strength checking and analysis
 python-dateutil>=2.8.0        # Date parsing and manipulation for backup timestamps
+python-dotenv>=1.0.0          # Environment variable loading from .env files
 
 # Web Interface
 flask>=2.3.0                  # Lightweight web framework for web interface

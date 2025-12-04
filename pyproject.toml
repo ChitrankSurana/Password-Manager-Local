@@ -1,0 +1,148 @@
+# pyproject.toml - Configuration for Python project tools
+# Personal Password Manager - Linting and Formatting Configuration
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "password-manager-local"
+version = "2.2.0"
+description = "Personal Password Manager with AES-256 encryption"
+requires-python = ">=3.10"
+authors = [
+    {name = "Password Manager Team"}
+]
+
+# Black - Code Formatter Configuration
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | venv
+  | data
+  | backups
+  | logs
+  | __pycache__
+)/
+'''
+
+# isort - Import Sorting Configuration
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+skip_gitignore = true
+skip = [
+    ".git",
+    ".tox",
+    "venv",
+    ".venv",
+    "build",
+    "dist",
+    "__pycache__",
+    "*.egg-info",
+    "data",
+    "backups"
+]
+known_first_party = ["src"]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+
+# Pylint Configuration
+[tool.pylint.main]
+py-version = "3.10"
+ignore = ["CVS", ".git", "__pycache__", "build", "dist", "data", "backups"]
+jobs = 0  # Use all CPU cores
+
+[tool.pylint.messages_control]
+max-line-length = 100
+disable = [
+    "C0103",  # Invalid name (too strict for our use case)
+    "C0114",  # Missing module docstring (we have comprehensive docstrings)
+    "C0115",  # Missing class docstring (we have comprehensive docstrings)
+    "C0116",  # Missing function docstring (we have comprehensive docstrings)
+    "R0913",  # Too many arguments (sometimes necessary)
+    "R0914",  # Too many local variables (sometimes necessary)
+    "W0613",  # Unused argument (sometimes necessary for interface compliance)
+    "C0301",  # Line too long (handled by black)
+]
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint.basic]
+good-names = ["i", "j", "k", "ex", "Run", "_", "id", "db", "ui", "x", "y"]
+
+# MyPy - Type Checking Configuration
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false  # Start lenient, make stricter later
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_optional = true
+show_error_codes = true
+ignore_missing_imports = true
+
+# Per-module options
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "setup"
+ignore_errors = true
+
+# Pytest Configuration
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers --cov=src --cov-report=term-missing --cov-report=html"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Coverage Configuration
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/build/*",
+    "*/dist/*"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
