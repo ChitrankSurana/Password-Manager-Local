@@ -116,9 +116,7 @@ def check_python_version() -> bool:
     else:
         print_colored("[ERROR] Python version is too old", Colors.RED)
         print_colored(
-            f"Please upgrade to Python {
-                required_version[0]}.{
-                required_version[1]} or higher",
+            f"Please upgrade to Python {required_version[0]}.{required_version[1]} or higher",
             Colors.YELLOW)
         print_colored("Download from: https://www.python.org/downloads/", Colors.BLUE)
         return False
@@ -516,8 +514,7 @@ def main() -> int:
                 all_checks_passed = True
             else:
                 print_colored(
-                    f"[ERROR] Some packages still missing: {
-                        ', '.join(still_missing)}", Colors.RED)
+                    f"[ERROR] Some packages still missing: {', '.join(still_missing)}", Colors.RED)
 
     # Check system requirements
     if not check_system_requirements():
