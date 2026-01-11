@@ -221,6 +221,14 @@ def check_package_installation(package_name: str, required_version: str = "any")
             import_name = "flask_session"
         elif package_name == "flask-wt":
             import_name = "flask_wt"
+        elif package_name == "flask-wtf":
+            import_name = "flask_wtf"
+        elif package_name == "flask-limiter":
+            import_name = "flask_limiter"
+        elif package_name == "python-dotenv":
+            import_name = "dotenv"
+        elif package_name == "pyinstaller":
+            import_name = "PyInstaller"
         elif package_name == "pytest-mock":
             import_name = "pytest_mock"
         elif package_name == "pytest-cov":
@@ -278,7 +286,7 @@ def check_python_packages() -> Tuple[bool, List[str]]:
 
     # Core packages (required)
     core_packages = [
-        "cryptography", "bcrypt", "customtkinter", "pillow",
+        "cryptography", "bcrypt", "pyotp", "qrcode", "customtkinter", "pillow",
         "pyperclip", "zxcvbn", "python-dateutil", "flask",
         "flask-session", "jinja2", "werkzeug", "requests"
     ]

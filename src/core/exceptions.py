@@ -597,6 +597,7 @@ __all__ = [
     "DecryptionError",
     "AccountLockedError",
     "SessionExpiredError",
+    "InvalidSessionError",
     "InvalidMasterPasswordError",
     # Validation
     "ValidationException",
