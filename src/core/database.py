@@ -577,16 +577,12 @@ class DatabaseManager:
                     locked_until = datetime.fromisoformat(user["locked_until"])
                     if datetime.now() < locked_until:
                         remaining_time = locked_until - datetime.now()
+                        remaining_minutes = remaining_time.seconds // 60
                         raise NewAccountLockedError(
-                            f"Account locked for {
-                                remaining_time.seconds //
-                                60} more minutes",
+                            f"Account locked for {remaining_minutes} more minutes",
                             error_code="SEC005",
-                            user_message=f"Your account is locked for {
-                                remaining_time.seconds //
-                                60} more minutes due to failed login attempts.",
-                            lockout_duration=remaining_time.seconds //
-                            60,
+                            user_message=f"Your account is locked for {remaining_minutes} more minutes due to failed login attempts.",
+                            lockout_duration=remaining_minutes,
                         )
                     else:
                         # Unlock account if lockout period has passed
