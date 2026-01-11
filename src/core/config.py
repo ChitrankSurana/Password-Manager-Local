@@ -36,10 +36,6 @@ import sys
 from pathlib import Path
 from typing import Type
 
-from config.default import DefaultConfig
-from config.development import DevelopmentConfig
-from config.production import ProductionConfig
-
 # Set UTF-8 encoding for Windows console
 if sys.platform == "win32":
     try:
@@ -74,6 +70,9 @@ except ImportError:
     )
 
 # Import configuration classes
+from config.default import DefaultConfig
+from config.development import DevelopmentConfig
+from config.production import ProductionConfig
 
 
 class TestingConfig(DefaultConfig):

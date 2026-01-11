@@ -334,6 +334,20 @@ class SessionExpiredError(SecurityException):
         )
 
 
+class InvalidSessionError(SecurityException):
+    """Exception raised when user session is invalid"""
+
+    def __init__(self, message: str = "Invalid session", **kwargs):
+        super().__init__(
+            message,
+            error_code="SEC008",
+            user_message="Invalid session. Please log in again.",
+            details=kwargs.pop("details", {}),
+            recoverable=True,
+            **kwargs,
+        )
+
+
 class InvalidMasterPasswordError(SecurityException):
     """Exception raised when master password is incorrect"""
 
@@ -597,6 +611,7 @@ __all__ = [
     "DecryptionError",
     "AccountLockedError",
     "SessionExpiredError",
+    "InvalidSessionError",
     "InvalidMasterPasswordError",
     # Validation
     "ValidationException",

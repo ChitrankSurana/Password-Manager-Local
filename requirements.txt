@@ -4,6 +4,8 @@
 # Encryption and Security
 cryptography>=41.0.0          # AES-256 encryption, PBKDF2 key derivation, secure random generation
 bcrypt>=4.0.0                  # Secure password hashing for user authentication
+pyotp>=2.9.0                  # Time-based One-Time Password (TOTP) support
+qrcode>=7.0                   # QR code generation for 2FA setup
 
 # GUI Framework
 customtkinter>=5.2.0           # Modern, customizable GUI framework with Windows 11 styling
