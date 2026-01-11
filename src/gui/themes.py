@@ -100,9 +100,7 @@ class ThemeManager:
         self._setup_customtkinter()
 
         logger.info(
-            f"Theme manager initialized: {
-                self.current_mode.value} mode, {
-                self.current_scheme.value} scheme")
+            f"Theme manager initialized: {self.current_mode.value} mode, {self.current_scheme.value} scheme")
 
     def _setup_customtkinter(self):
         """Configure CustomTkinter appearance settings"""
