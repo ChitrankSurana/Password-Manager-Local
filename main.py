@@ -5,33 +5,24 @@ Personal Password Manager - Main Entry Point
 ============================================
 
 This is the main entry point for the Personal Password Manager application.
-It provides options to run either the GUI interface or the web interface,
-and handles initial setup and configuration.
-
-Features:
-- Multi-user password management with strong encryption
-- Modern GUI interface with Windows 11 styling and dark mode
-- Web interface for browser-based access
-- Secure local SQLite database storage
-- Password generation and strength checking
-- Backup and restore capabilities
-- Import/Export functionality
+It launches the Flet-based UI in either desktop window mode (default) or
+web browser mode (--web flag).
 
 Usage:
-    python main.py [--gui|--web|--check-deps]
+    python main.py [--desktop|--web|--check-deps]
 
-    --gui        Launch GUI interface (default)
-    --web        Launch web interface
+    --desktop    Launch Flet desktop window (default)
+    --web        Launch Flet web interface in browser
     --check-deps Run dependency checker only
     --help       Show this help message
 
 Security Note:
-    All passwords are encrypted using AES-256 with PBKDF2 key derivation.
-    The master password is never stored in plain text.
+    All passwords are encrypted using AES-256-GCM with PBKDF2 key derivation
+    (600,000 iterations). The master password is never stored in plain text.
     Database files are stored locally for maximum security.
 
 Author: Personal Password Manager
-Version: 2.2.0
+Version: 3.0.0
 """
 
 import argparse
@@ -47,14 +38,14 @@ def print_banner():
     banner = """
     ==============================================================
                    Personal Password Manager
-                        Version 2.2.0
+                        Version 3.0.0
 
-    A secure, local password manager with modern GUI and
-    web interfaces, featuring strong encryption and backup
-    capabilities for personal use.
+    A secure, local password manager with AES-256-GCM
+    encryption, featuring desktop and web interfaces
+    powered by Flet (Material Design 3).
 
-    * AES-256 Encryption  * Modern GUI  * Web Interface
-    * Local Storage      * Password Gen  * Import/Export
+    * AES-256-GCM       * Desktop + Web   * Password Gen
+    * PBKDF2 (600k)     * Local Storage    * Import/Export
     ==============================================================
     """
     print(banner)
@@ -94,7 +85,7 @@ def setup_environment():
     """
     try:
         # Ensure required directories exist
-        directories = ["data", "backups", "Code Explanations"]
+        directories = ["data", "backups", "exports", "Code Explanations"]
 
         for directory in directories:
             dir_path = Path(directory)
@@ -124,269 +115,58 @@ def setup_environment():
         return False
 
 
-def launch_gui():
+def launch_flet_desktop():
     """
-    Launch the GUI interface
+    Launch the Flet desktop application (default mode).
 
-    This function starts the main GUI application with CustomTkinter,
-    featuring a modern Windows 11 style interface with dark mode support.
+    Opens a native desktop window powered by Flet / Material Design 3.
     """
-    print("Starting GUI interface...")
+    print("Starting Flet desktop interface...")
 
     try:
-        # Import GUI modules
-        import customtkinter as ctk
-
-        from src.core.auth import AuthenticationManager
-        from src.core.password_manager import PasswordManagerCore
-        from src.core.settings_service import create_settings_service
-        from src.gui.first_time_setup import FirstTimeSetupWizard
-        from src.gui.login_window import LoginWindow
-        from src.gui.main_window import MainWindow
-        from src.gui.themes import setup_theme
-        from src.utils.font_manager import initialize_font_manager
-
-        # Initialize theme system
-        setup_theme()
-
-        # Create a hidden root window for proper Tkinter application structure
-        root = ctk.CTk()
-        root.withdraw()
-
-        # Initialize managers
-        auth_manager = AuthenticationManager()
-        password_manager = PasswordManagerCore(auth_manager=auth_manager)
-
-        # Initialize settings service (get database manager from password_manager)
-        settings_service = create_settings_service(password_manager.database_manager)
-
-        main_window_ref = [None]  # Use list to allow modification in nested function
-        login_window_ref = [None]  # Use list to allow modification in nested function
-
-        def show_login_window():
-            """Show the login window"""
-
-            def on_login_success(session_id: str, username: str, master_password: str = None):
-                """Callback when login is successful"""
-                # Cache master password for convenience (if provided)
-                if master_password:
-                    password_manager._cache_master_password(session_id, master_password)
-
-                # Close the login window
-                try:
-                    if login_window_ref[0]:
-                        login_window_ref[0].destroy()
-                        login_window_ref[0] = None
-                except Exception:
-                    pass
-
-                # Get user ID from session
-                try:
-                    user_info = auth_manager.get_session_info(session_id)
-                    user_id = user_info.get("user_id") if user_info else None
-                except Exception:
-                    user_id = None
-
-                # Check if first-time setup is needed
-                first_time_setup_completed = (
-                    settings_service.get_user_setting(
-                        user_id, "ui_preferences", "first_time_setup_completed"
-                    )
-                    if user_id
-                    else True
-                )
-
-                def create_main_window(font_size: str = None):
-                    """Create the main window after setup (if needed)"""
-                    # Initialize font manager with user's preference
-                    if font_size:
-                        initialize_font_manager(font_size)
-                    elif user_id:
-                        # Get font size from settings
-                        saved_font_size = settings_service.get_user_setting(
-                            user_id, "ui_preferences", "font_size"
-                        )
-                        initialize_font_manager(saved_font_size or "medium")
-                    else:
-                        initialize_font_manager("medium")
-
-                    # Create main window with logout callback
-                    def on_logout():
-                        """Callback when user logs out - reopen login window"""
-                        show_login_window()
-
-                    main_window = MainWindow(
-                        session_id=session_id,
-                        username=username,
-                        password_manager=password_manager,
-                        auth_manager=auth_manager,
-                        parent=root,
-                        on_logout_callback=on_logout,
-                    )
-                    main_window_ref[0] = main_window
-
-                    # When main window is closed via X button, logout and quit
-                    def on_main_window_close():
-                        try:
-                            auth_manager.logout_user(session_id)
-                        except Exception:
-                            pass
-                        try:
-                            main_window.destroy()
-                        except Exception:
-                            pass
-                        root.quit()
-
-                    main_window.protocol("WM_DELETE_WINDOW", on_main_window_close)
-
-                # Show first-time setup wizard if needed
-                if not first_time_setup_completed and user_id:
-
-                    def on_setup_complete(font_size: str):
-                        """Callback when first-time setup completes"""
-                        create_main_window(font_size)
-
-                    # Show the first-time setup wizard
-                    FirstTimeSetupWizard(
-                        parent=root,
-                        user_id=user_id,
-                        settings_service=settings_service,
-                        on_complete_callback=on_setup_complete,
-                    )
-                else:
-                    # No first-time setup needed, go directly to main window
-                    create_main_window()
-
-            def on_login_window_close():
-                """Handle login window close - quit application"""
-                root.quit()
-
-            # Create login window
-            login_window = LoginWindow(auth_manager, on_login_success, parent=root)
-            login_window.protocol("WM_DELETE_WINDOW", on_login_window_close)
-            login_window_ref[0] = login_window
-
-        # Start by showing the login window
-        show_login_window()
-
-        # Start the application
-        root.mainloop()
-
+        from src.flet_app.app import run_desktop
+        run_desktop()
     except ImportError as e:
-        print(f"[ERROR] GUI dependencies not found: {e}")
-        print("Please run: python check_dependencies.py")
+        print(f"[ERROR] Flet not installed: {e}")
+        print("Please run: pip install flet>=0.25.0")
         return False
     except Exception as e:
-        print(f"[ERROR] GUI startup failed: {e}")
+        print(f"[ERROR] Flet desktop startup failed: {e}")
         return False
 
     return True
 
 
-def launch_web():
+def launch_flet_web():
     """
-    Launch the web interface
+    Launch the Flet web application.
 
-    This function starts the Flask web server for browser-based access
-    to the password manager.
+    Opens the password manager in the user's default web browser.
+    Binds to 127.0.0.1 (localhost) only for security.
     """
-    print("Starting web interface...")
+    print("Starting Flet web interface...")
 
     try:
-        # Import web modules
-        from src.web.app import create_app
-
-        # Create Flask application
-        app = create_app()
-
-        # Configuration for development
-        app.config["DEBUG"] = False  # Set to False for production
-        app.config["HOST"] = "127.0.0.1"  # Localhost only for security
-        app.config["PORT"] = 5000
-
-        print(f"Web interface starting at http://{app.config['HOST']}:{app.config['PORT']}")
-        print("Access the password manager through your web browser")
+        from src.flet_app.app import run_web
+        print("Web interface starting at http://127.0.0.1:5000")
         print("Press Ctrl+C to stop the server")
-
-        # Start the web server
-        app.run(
-            host=app.config["HOST"],
-            port=app.config["PORT"],
-            debug=app.config["DEBUG"],
-            threaded=True,
-        )
-
+        run_web(host="127.0.0.1", port=5000)
     except ImportError as e:
-        print(f"[ERROR] Web dependencies not found: {e}")
-        print("Please run: python check_dependencies.py")
+        print(f"[ERROR] Flet not installed: {e}")
+        print("Please run: pip install flet>=0.25.0")
         return False
     except Exception as e:
-        print(f"[ERROR] Web server startup failed: {e}")
+        print(f"[ERROR] Flet web startup failed: {e}")
         return False
 
     return True
-
-
-def show_help():
-    """Display help information"""
-    help_text = """
-Personal Password Manager - Help
-===============================
-
-USAGE:
-    python main.py [options]
-
-OPTIONS:
-    --gui        Launch GUI interface (default)
-    --web        Launch web interface
-    --check-deps Run dependency checker only
-    --help       Show this help message
-
-EXAMPLES:
-    python main.py                    # Start GUI interface
-    python main.py --gui              # Start GUI interface
-    python main.py --web              # Start web interface
-    python main.py --check-deps       # Check dependencies
-
-FIRST TIME SETUP:
-    1. Run dependency checker:        python main.py --check-deps
-    2. Install missing packages:      pip install -r requirements.txt
-    3. Start the application:         python main.py
-
-INTERFACES:
-    GUI Interface:
-    - Modern Windows 11 style interface
-    - Dark mode support
-    - Native desktop application feel
-    - Recommended for daily use
-
-    Web Interface:
-    - Browser-based access
-    - Responsive design
-    - Access from localhost only (127.0.0.1:5000)
-    - Good for remote access via SSH tunneling
-
-SECURITY:
-    - All passwords encrypted with AES-256
-    - PBKDF2 key derivation
-    - Local database storage only
-    - No network connections (except optional cloud sync)
-    - Master password never stored
-
-FILES:
-    data/           Database storage directory
-    backups/        Backup files directory
-    main.py         Main application entry point
-    requirements.txt Python dependencies
-
-For more information, see README.md
-    """
-    print(help_text)
 
 
 def parse_arguments():
     """
-    Parse command line arguments
+    Parse command line arguments.
+
+    The default mode (no flags) launches the Flet desktop window.
 
     Returns:
         argparse.Namespace: Parsed arguments
@@ -396,9 +176,9 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py                    Start GUI interface (default)
-  python main.py --gui              Start GUI interface
-  python main.py --web              Start web interface
+  python main.py                    Start Flet desktop (default)
+  python main.py --desktop          Start Flet desktop
+  python main.py --web              Start Flet web interface
   python main.py --check-deps       Check dependencies only
 
 For more help: python main.py --help
@@ -409,10 +189,12 @@ For more help: python main.py --help
     interface_group = parser.add_mutually_exclusive_group()
 
     interface_group.add_argument(
-        "--gui", action="store_true", help="Launch GUI interface (default)"
+        "--desktop", action="store_true", help="Launch Flet desktop window (default)"
     )
 
-    interface_group.add_argument("--web", action="store_true", help="Launch web interface")
+    interface_group.add_argument(
+        "--web", action="store_true", help="Launch Flet web interface in browser"
+    )
 
     interface_group.add_argument(
         "--check-deps", action="store_true", help="Run dependency checker only"
@@ -421,9 +203,9 @@ For more help: python main.py --help
     # Parse arguments
     args = parser.parse_args()
 
-    # If no interface specified, default to GUI
-    if not any([args.gui, args.web, args.check_deps]):
-        args.gui = True
+    # If no interface specified, default to Flet desktop
+    if not any([args.desktop, args.web, args.check_deps]):
+        args.desktop = True
 
     return args
 
@@ -454,24 +236,13 @@ def main():
             print("[ERROR] Environment setup failed. Please check permissions.")
             return 1
 
-        # Check dependencies before starting interfaces
-        print("Performing quick dependency check...")
-
-        # Basic dependency check (faster than full check)
-        try:
-            print("[OK] Core dependencies available")
-        except ImportError as e:
-            print(f"[ERROR] Missing core dependency: {e}")
-            print("Please run: python main.py --check-deps")
-            return 1
-
         # Launch appropriate interface
         success = False
 
-        if args.gui:
-            success = launch_gui()
+        if args.desktop:
+            success = launch_flet_desktop()
         elif args.web:
-            success = launch_web()
+            success = launch_flet_web()
 
         return 0 if success else 1
 

@@ -92,11 +92,19 @@ class DefaultConfig:
     # =========================================================================
 
     # Encryption settings
-    ENCRYPTION_ALGORITHM = "AES-256-CBC"
-    PBKDF2_ITERATIONS = int(os.getenv("PBKDF2_ITERATIONS", "100000"))
+    # AES-256-GCM provides authenticated encryption (confidentiality + integrity).
+    # Unlike the old CBC mode, GCM includes an authentication tag that detects
+    # any ciphertext tampering, making it immune to padding oracle attacks.
+    ENCRYPTION_ALGORITHM = "AES-256-GCM"
+    # 600,000 iterations is the OWASP 2023+ recommendation for PBKDF2-HMAC-SHA256.
+    # This makes brute-force attacks require ~1-2 seconds per guess on modern hardware.
+    PBKDF2_ITERATIONS = int(os.getenv("PBKDF2_ITERATIONS", "600000"))
     PBKDF2_ALGORITHM = "sha256"
-    SALT_LENGTH = 32  # bytes
-    IV_LENGTH = 16  # bytes for AES
+    SALT_LENGTH = 32  # bytes (256-bit salt for PBKDF2)
+    GCM_NONCE_LENGTH = 12  # bytes (96-bit nonce per NIST SP 800-38D)
+    GCM_TAG_LENGTH = 16  # bytes (128-bit authentication tag)
+    # Legacy: kept for reference, v1 blobs used 16-byte IVs
+    IV_LENGTH = 16  # bytes for AES-CBC (legacy v1 format only)
 
     # Password hashing (for user accounts)
     BCRYPT_ROUNDS = int(os.getenv("BCRYPT_ROUNDS", "12"))
@@ -111,25 +119,31 @@ class DefaultConfig:
     LOCKOUT_DURATION_MINUTES = int(os.getenv("LOCKOUT_DURATION_MINUTES", "30"))
 
     # Master password caching
+    # The master password is held in memory so the user doesn't have to
+    # re-enter it for every decrypt operation. A shorter timeout (60s)
+    # limits the exposure window if the process memory is compromised.
     MASTER_PASSWORD_CACHE_ENABLED = os.getenv("MASTER_PASSWORD_CACHE_ENABLED", "True").lower() in (
         "true",
         "1",
         "yes",
     )
     MASTER_PASSWORD_CACHE_TIMEOUT = int(
-        os.getenv("MASTER_PASSWORD_CACHE_TIMEOUT", "300")
-    )  # seconds (5 minutes)
+        os.getenv("MASTER_PASSWORD_CACHE_TIMEOUT", "60")
+    )  # seconds (1 minute, reduced from 5 for security)
 
     # Security audit logging
     AUDIT_LOG_ENABLED = os.getenv("AUDIT_LOG_ENABLED", "True").lower() in ("true", "1", "yes")
     AUDIT_LOG_RETENTION_DAYS = int(os.getenv("AUDIT_LOG_RETENTION_DAYS", "90"))
 
     # Password strength requirements
-    MIN_PASSWORD_LENGTH = 8
-    REQUIRE_UPPERCASE = False
-    REQUIRE_LOWERCASE = False
-    REQUIRE_DIGITS = False
-    REQUIRE_SPECIAL_CHARS = False
+    # A 12-character minimum with all character classes is the NIST SP 800-63B
+    # recommendation for memorized secrets. Combined with PBKDF2 at 600k
+    # iterations, this makes offline brute-force attacks infeasible.
+    MIN_PASSWORD_LENGTH = 12
+    REQUIRE_UPPERCASE = True
+    REQUIRE_LOWERCASE = True
+    REQUIRE_DIGITS = True
+    REQUIRE_SPECIAL_CHARS = True
 
     # =========================================================================
     # LOGGING SETTINGS

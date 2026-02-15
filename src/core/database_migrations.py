@@ -695,7 +695,8 @@ class DatabaseMigrationManager:
         )
         logger.info("Created index on totp_enabled column")
 
-        # 5. Add migration audit log entry (if table exists)
+        # 5. Add migration audit log entry (if table exists and constraints allow)
+        # Note: We skip audit logging for migrations since user_id=0 may violate FK constraints
         try:
             cursor.execute(
                 """
@@ -724,6 +725,9 @@ class DatabaseMigrationManager:
                 logger.warning("security_audit_log table does not exist, skipping audit log entry")
             else:
                 raise
+        except sqlite3.IntegrityError:
+            # FK constraint failure (user_id=0 doesn't exist) - skip audit log for migrations
+            logger.warning("Skipping migration audit log entry due to FK constraint (no system user)")
 
         logger.info("Migration to version 4 completed successfully")
 
@@ -806,7 +810,7 @@ class DatabaseMigrationManager:
         cursor.execute("ANALYZE")
         logger.info("Updated query planner statistics")
 
-        # 8. Add migration audit log entry
+        # 8. Add migration audit log entry (if table exists and constraints allow)
         try:
             cursor.execute(
                 """
@@ -840,6 +844,9 @@ class DatabaseMigrationManager:
                 logger.warning("security_audit_log table does not exist, skipping audit log entry")
             else:
                 raise
+        except sqlite3.IntegrityError:
+            # FK constraint failure (user_id=0 doesn't exist) - skip audit log for migrations
+            logger.warning("Skipping migration audit log entry due to FK constraint (no system user)")
 
         logger.info("Migration to version 5 completed successfully")
 

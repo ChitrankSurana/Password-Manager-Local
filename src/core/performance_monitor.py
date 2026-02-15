@@ -84,7 +84,7 @@ class PerformanceMonitor:
         return {
             "count": 0,
             "total_time_ms": 0.0,
-            "min_time_ms": float("in"),
+            "min_time_ms": float("inf"),
             "max_time_ms": 0.0,
             "avg_time_ms": 0.0,
             "success_count": 0,

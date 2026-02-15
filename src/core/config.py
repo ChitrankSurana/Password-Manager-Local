@@ -36,10 +36,6 @@ import sys
 from pathlib import Path
 from typing import Type
 
-from config.default import DefaultConfig
-from config.development import DevelopmentConfig
-from config.production import ProductionConfig
-
 # Set UTF-8 encoding for Windows console
 if sys.platform == "win32":
     try:
@@ -54,7 +50,8 @@ if sys.platform == "win32":
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# Load environment variables from .env file
+# IMPORTANT: Load environment variables from .env file BEFORE importing config classes
+# This ensures that config classes can read environment variables when they're imported
 try:
     from dotenv import load_dotenv
 
@@ -73,7 +70,10 @@ except ImportError:
         "  Using environment variables and defaults only."
     )
 
-# Import configuration classes
+# Import configuration classes AFTER loading .env file
+from config.default import DefaultConfig
+from config.development import DevelopmentConfig
+from config.production import ProductionConfig
 
 
 class TestingConfig(DefaultConfig):

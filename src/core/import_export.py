@@ -33,6 +33,7 @@ Version: 2.2.0
 import csv
 import io
 import json
+import os
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -86,19 +87,43 @@ class ImportExportService:
         passwords: List[PasswordEntry],
         output_path: str,
         include_metadata: bool = True,
+        confirm_plaintext: bool = False,
     ) -> bool:
         """
         Export passwords to CSV format
+
+        WARNING: CSV exports contain passwords in PLAINTEXT. The caller must
+        pass confirm_plaintext=True to acknowledge this risk explicitly.
+
+        Security controls applied:
+        - confirm_plaintext gate prevents accidental plaintext exports.
+        - File permissions are set to 0o600 (owner-only) on POSIX systems.
+        - A security audit event is logged for traceability.
 
         Args:
             user_id: User ID for audit logging
             passwords: List of password entries to export
             output_path: Path to save CSV file
             include_metadata: Include created_at and last_modified columns
+            confirm_plaintext: Must be True to proceed — explicit
+                acknowledgement that the output will be UNENCRYPTED.
 
         Returns:
             bool: True if export successful
+
+        Raises:
+            SecurityException: If confirm_plaintext is False or export fails
         """
+        # SECURITY GATE: CSV files contain passwords in cleartext.
+        # Require the caller to explicitly opt in so that accidental
+        # exports via automated code paths are blocked.
+        if not confirm_plaintext:
+            raise SecurityException(
+                "Plaintext CSV export requires explicit confirmation. "
+                "Pass confirm_plaintext=True to acknowledge that the output "
+                "file will contain UNENCRYPTED passwords."
+            )
+
         try:
             # Define CSV columns
             if include_metadata:
@@ -132,7 +157,19 @@ class ImportExportService:
 
                     writer.writerow(row)
 
-            # Audit log
+            # RESTRICT FILE PERMISSIONS: Set output file to 0o600
+            # (owner read/write only) so other users on the machine
+            # cannot read the plaintext passwords.
+            try:
+                os.chmod(output_path, 0o600)
+            except OSError:
+                # chmod may fail on Windows or certain filesystems.
+                logger.warning(
+                    f"Could not restrict file permissions on {output_path}. "
+                    "Ensure the file is stored in a secure location."
+                )
+
+            # Audit log — records that a plaintext export occurred
             log_audit_event(
                 "EXPORT_CSV",
                 user_id,
@@ -140,12 +177,24 @@ class ImportExportService:
                     "count": len(passwords),
                     "include_metadata": include_metadata,
                     "output_path": output_path,
+                    "plaintext_confirmed": True,
                 },
+            )
+
+            # Security event — higher visibility than audit log
+            log_security_event(
+                "PLAINTEXT_EXPORT",
+                f"User {user_id} exported {len(passwords)} passwords as "
+                f"plaintext CSV to {output_path}",
+                severity="WARNING",
+                user_id=user_id,
             )
 
             logger.info(f"Exported {len(passwords)} passwords to CSV: {output_path}")
             return True
 
+        except SecurityException:
+            raise  # Re-raise our own errors without wrapping
         except Exception as e:
             logger.error(f"CSV export failed: {e}")
             raise SecurityException(f"Failed to export passwords to CSV: {e}")

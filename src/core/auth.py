@@ -29,12 +29,14 @@ Author: Personal Password Manager
 Version: 2.2.0
 """
 
+import hashlib
+import hmac
 import secrets
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Import our core modules with new error handling
 from .database import DatabaseManager
@@ -229,8 +231,15 @@ class AuthenticationManager:
             if not username or not username.strip():
                 raise AuthenticationError("Username cannot be empty")
 
-            if not master_password or len(master_password) < 8:
-                raise AuthenticationError("Master password must be at least 8 characters")
+            if not master_password:
+                raise AuthenticationError("Master password cannot be empty")
+
+            # Enforce password complexity requirements.
+            # This prevents users from choosing weak master passwords that
+            # are vulnerable to brute-force or dictionary attacks.
+            is_valid, complexity_error = self._validate_password_complexity(master_password)
+            if not is_valid:
+                raise AuthenticationError(complexity_error)
 
             # Create user in database
             user_id = self.db_manager.create_user(username.strip(), master_password)
@@ -318,7 +327,11 @@ class AuthenticationManager:
                 user_id=user_info["user_id"],
                 username=user_info["username"],
                 expires_at=datetime.now() + timedelta(hours=self.session_timeout_hours),
-                master_password_hash=self._hash_password_for_session(master_password),
+                # Salt the session hash with the session_id for domain separation.
+                # This prevents cross-session hash reuse even with the same password.
+                master_password_hash=self._hash_password_for_session(
+                    master_password, salt=session_id
+                ),
                 login_ip=login_ip,
                 user_agent=user_agent,
                 encryption_system=PasswordEncryption(),
@@ -603,9 +616,14 @@ class AuthenticationManager:
             # Validate session
             session = self.validate_session(session_id)
 
-            # Validate new password
-            if not new_password or len(new_password) < 8:
-                raise AuthenticationError("New password must be at least 8 characters")
+            # Validate new password against complexity requirements.
+            # Even if the user's original password was created before these
+            # rules existed, the new password must meet current standards.
+            if not new_password:
+                raise AuthenticationError("New password cannot be empty")
+            is_valid, complexity_error = self._validate_password_complexity(new_password)
+            if not is_valid:
+                raise AuthenticationError(complexity_error)
 
             # Verify current password by attempting to authenticate
             user_info = self.db_manager.authenticate_user(session.username, current_password)
@@ -660,8 +678,10 @@ class AuthenticationManager:
                     logger.error(f"Failed to update password entry {entry_update['entry_id']}")
                     raise AuthenticationError("Failed to update password entries")
 
-            # Update session's cached master password hash
-            session.master_password_hash = self._hash_password_for_session(new_password)
+            # Update session's cached master password hash (salted with session_id)
+            session.master_password_hash = self._hash_password_for_session(
+                new_password, salt=session.session_id
+            )
 
             # Log successful password change
             log_security_event(
@@ -926,22 +946,114 @@ class AuthenticationManager:
         """
         return secrets.token_hex(self.SESSION_TOKEN_LENGTH)
 
-    def _hash_password_for_session(self, password: str) -> str:
+    def _hash_password_for_session(
+        self, password: str, salt: str = ""
+    ) -> str:
         """
-        Create a hash of the master password for session caching
+        Create a salted hash of the master password for session caching.
 
-        This is used to validate the master password without storing it directly.
-        The hash is only stored in memory during the session.
+        Uses HMAC-SHA256 with a salt (typically the session ID) to prevent:
+        - Rainbow table attacks on the in-memory hash
+        - Cross-session hash reuse (each session gets a unique hash)
+
+        The hash is only stored in memory during the session and is never
+        persisted to disk.
 
         Args:
-            password (str): Master password to hash
+            password: Master password to hash
+            salt: Salt value (e.g., session_id) for domain separation
 
         Returns:
-            str: SHA-256 hash of the password (for session use only)
+            str: HMAC-SHA256 hex digest of the salted password
         """
-        import hashlib
+        # Use HMAC-SHA256 with the salt as the key and password as the message.
+        # This ensures that even if two sessions use the same master password,
+        # they produce different hashes (because the session_id salt differs).
+        return hmac.new(
+            salt.encode("utf-8"),
+            password.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
-        return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    def verify_session_password_hash(
+        self, password: str, stored_hash: str, salt: str = ""
+    ) -> bool:
+        """
+        Verify a master password against a stored session hash using
+        constant-time comparison.
+
+        Uses hmac.compare_digest() which runs in constant time regardless
+        of how many characters match. This prevents timing side-channel
+        attacks where an attacker measures response times to deduce the
+        correct hash character-by-character.
+
+        Args:
+            password: The master password to verify
+            stored_hash: The HMAC-SHA256 hash to compare against
+            salt: The salt used when the hash was created
+
+        Returns:
+            bool: True if the password matches, False otherwise
+        """
+        computed_hash = self._hash_password_for_session(password, salt)
+        # hmac.compare_digest runs in constant time — it always compares
+        # all bytes regardless of where the first mismatch occurs.
+        # Standard == would short-circuit on first mismatch, leaking timing info.
+        return hmac.compare_digest(computed_hash, stored_hash)
+
+    def _validate_password_complexity(
+        self, password: str
+    ) -> tuple:
+        """
+        Validate a master password against complexity requirements.
+
+        Complexity rules are designed to resist offline brute-force and
+        dictionary attacks. The requirements follow NIST SP 800-63B:
+        - Minimum length of 12 characters (configurable via MIN_PASSWORD_LENGTH)
+        - At least one uppercase letter (A-Z)
+        - At least one lowercase letter (a-z)
+        - At least one digit (0-9)
+        - At least one special character (!@#$%^&* etc.)
+
+        These rules are enforced during account creation and password change.
+        Existing users with weaker passwords are NOT retroactively locked out
+        — they can still log in, but will be required to meet the new
+        complexity rules when they next change their password.
+
+        Args:
+            password: The password to validate
+
+        Returns:
+            tuple: (is_valid: bool, error_message: str)
+                - (True, "") if the password meets all requirements
+                - (False, "description of what's missing") if it does not
+        """
+        issues = []
+
+        # Length check — MIN_PASSWORD_LENGTH defaults to 12 (config/default.py)
+        min_length = 12  # Matches config/default.py MIN_PASSWORD_LENGTH
+        if len(password) < min_length:
+            issues.append(f"at least {min_length} characters (currently {len(password)})")
+
+        # Character class checks — each adds entropy and resists
+        # different attack strategies (dictionary, numeric, etc.)
+        if not any(c.isupper() for c in password):
+            issues.append("at least one uppercase letter (A-Z)")
+
+        if not any(c.islower() for c in password):
+            issues.append("at least one lowercase letter (a-z)")
+
+        if not any(c.isdigit() for c in password):
+            issues.append("at least one digit (0-9)")
+
+        special_chars = "!@#$%^&*()_+-=[]{}|;:,.<>?"
+        if not any(c in special_chars for c in password):
+            issues.append("at least one special character (!@#$%^&*...)")
+
+        if issues:
+            return (False, "Password must contain: " + "; ".join(issues))
+
+        return (True, "")
 
     def _cleanup_expired_sessions(self):
         """Remove expired sessions from memory"""

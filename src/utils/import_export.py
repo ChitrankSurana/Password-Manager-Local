@@ -346,25 +346,51 @@ class BackupManager:
             raise ImportError(f"Failed to import data: {e}")
 
     def export_plain_csv(
-        self, user_id: int, username: str, master_password: str, output_path: str
+        self,
+        user_id: int,
+        username: str,
+        master_password: str,
+        output_path: str,
+        confirm_plaintext: bool = False,
     ) -> str:
         """
         Export password data as plain (unencrypted) CSV for Excel
 
-        WARNING: This creates an UNENCRYPTED file. Use with caution!
+        WARNING: This creates an UNENCRYPTED file containing all passwords in
+        cleartext. The file is readable by anyone with filesystem access.
+
+        Security controls:
+        - Caller MUST pass confirm_plaintext=True to acknowledge the risk.
+          This prevents accidental plaintext exports via programmatic calls.
+        - Output file permissions are set to 0o600 (owner read/write only)
+          on POSIX systems so other users on the machine cannot read it.
+        - A security audit event is logged so administrators can track when
+          plaintext exports occur.
 
         Args:
             user_id (int): User ID
             username (str): Username for export metadata
             master_password (str): Master password to decrypt stored passwords
             output_path (str): Path where CSV should be saved
+            confirm_plaintext (bool): Must be True to proceed — explicit
+                acknowledgement that the output will be UNENCRYPTED.
 
         Returns:
             str: Path to the created CSV file
 
         Raises:
-            ExportError: If export fails
+            ExportError: If export fails or confirm_plaintext is not True
         """
+        # SECURITY GATE: Require explicit confirmation for plaintext export.
+        # This prevents accidental exposure when the method is called from
+        # automated code paths or future integrations.
+        if not confirm_plaintext:
+            raise ExportError(
+                "Plaintext CSV export requires explicit confirmation. "
+                "Pass confirm_plaintext=True to acknowledge that the output "
+                "file will contain UNENCRYPTED passwords."
+            )
+
         try:
             # Get all password entries for user
             entries = self.db_manager.get_password_entries(user_id)
@@ -414,9 +440,33 @@ class BackupManager:
                 for entry in decrypted_entries:
                     writer.writerow(entry)
 
+            # RESTRICT FILE PERMISSIONS: On POSIX systems, set the output file
+            # to 0o600 (owner read/write only) so other users on the machine
+            # cannot read the plaintext passwords. On Windows this is a no-op
+            # since Windows uses ACLs, not POSIX permission bits.
+            try:
+                os.chmod(output_path, 0o600)
+            except OSError:
+                # chmod may fail on Windows or certain filesystems — log but
+                # don't abort, the export itself succeeded.
+                logger.warning(
+                    f"Could not restrict file permissions on {output_path}. "
+                    "Ensure the file is stored in a secure location."
+                )
+
+            # SECURITY AUDIT: Log that a plaintext export occurred so
+            # administrators can review and detect unauthorized exports.
+            logger.warning(
+                f"SECURITY AUDIT: Plaintext CSV export performed by user "
+                f"{username} (ID: {user_id}). Output: {output_path}. "
+                f"Entries exported: {len(decrypted_entries)}."
+            )
+
             logger.info(f"Plain CSV exported: {output_path}")
             return str(output_path)
 
+        except ExportError:
+            raise  # Re-raise our own errors without wrapping
         except Exception as e:
             logger.error(f"Plain CSV export failed: {e}")
             raise ExportError(f"Failed to export plain CSV: {e}")
@@ -657,12 +707,71 @@ class BackupManager:
         """
         Import password entries into database
 
+        Before encrypting any imported data, this method verifies that the
+        master password is correct. This prevents a subtle but dangerous bug:
+        if the wrong master password is used, all imported entries get encrypted
+        with a key derived from the wrong password. Those entries become
+        permanently unreadable — the user's real master password cannot decrypt
+        them, and the wrong password was never stored.
+
+        Verification strategy:
+        - If the user already has entries: attempt to decrypt one existing
+          entry with the provided master password. If decryption fails, the
+          password is wrong and we abort before importing anything.
+        - If the user has no entries: perform a trial encrypt/decrypt roundtrip
+          with a known test string to ensure the encryption module is working
+          correctly with the provided password.
+
         Args:
             user_id: User ID
             entries: List of password entries to import
             master_password: Master password for encryption
             import_mode: Import mode - "merge", "add_all", or "replace"
         """
+        # --- MASTER PASSWORD VERIFICATION ---
+        # Verify the master password is correct BEFORE importing anything.
+        existing_entries = self.db_manager.get_password_entries(user_id)
+
+        if existing_entries:
+            # User has existing entries: try to decrypt one as a verification.
+            # We pick the first entry and attempt decryption. If it fails,
+            # the master password is wrong.
+            test_entry = existing_entries[0]
+            try:
+                self.encryption.decrypt_password(
+                    test_entry["password_encrypted"], master_password
+                )
+            except Exception:
+                raise ImportExportError(
+                    "Master password verification failed. Cannot import data "
+                    "with an incorrect master password — entries would become "
+                    "permanently unreadable. Please provide the correct "
+                    "master password."
+                )
+        else:
+            # No existing entries: do a trial encrypt/decrypt roundtrip to
+            # verify the encryption module works with this password.
+            test_plaintext = "import-verification-test"
+            try:
+                encrypted = self.encryption.encrypt_password(
+                    test_plaintext, master_password
+                )
+                decrypted = self.encryption.decrypt_password(
+                    encrypted, master_password
+                )
+                if decrypted != test_plaintext:
+                    raise ImportExportError(
+                        "Encryption roundtrip verification failed. "
+                        "The encryption module did not produce consistent results."
+                    )
+            except ImportExportError:
+                raise
+            except Exception as e:
+                raise ImportExportError(
+                    f"Encryption verification failed: {e}. "
+                    "Cannot safely import data."
+                )
+
         imported_count = 0
         skipped_count = 0
         error_count = 0

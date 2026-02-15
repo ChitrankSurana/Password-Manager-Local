@@ -821,6 +821,87 @@ class DatabaseManager:
                 user_message="Could not load password entries. Please try again.",
             )
 
+    def needs_encryption_migration(self, user_id: int) -> bool:
+        """
+        Check if any password entries for a user still use the legacy v1 (AES-CBC) format.
+
+        This reads the first byte (version byte) of each entry's password_encrypted
+        blob. Version 0x01 indicates AES-CBC (legacy), version 0x02 indicates
+        AES-GCM (current). If any entries have version 0x01, they need migration.
+
+        This method is efficient — it only reads the version byte, not the full blob,
+        and stops as soon as it finds one v1 entry.
+
+        Args:
+            user_id: The user's database ID
+
+        Returns:
+            bool: True if at least one entry needs migration, False if all are v2
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Use SUBSTR to read only the first byte of each encrypted blob.
+                # Compare against x'01' (the v1/CBC version byte).
+                # LIMIT 1 means we stop as soon as we find one match.
+                cursor.execute(
+                    """
+                    SELECT 1 FROM passwords
+                    WHERE user_id = ? AND SUBSTR(password_encrypted, 1, 1) = x'01'
+                    LIMIT 1
+                    """,
+                    (user_id,),
+                )
+                result = cursor.fetchone()
+                needs_migration = result is not None
+
+                if needs_migration:
+                    logger.info(
+                        f"User {user_id} has entries needing encryption migration (v1→v2)"
+                    )
+                else:
+                    logger.debug(f"User {user_id} has no entries needing migration")
+
+                return needs_migration
+
+        except Exception as e:
+            log_exception(logger, e, "Failed to check encryption migration status")
+            # On error, assume no migration needed to avoid blocking login
+            return False
+
+    def get_v1_entry_ids(self, user_id: int) -> List[int]:
+        """
+        Get the entry IDs of all password entries still using v1 (AES-CBC) format.
+
+        Used by the migration process to identify which entries need to be re-encrypted.
+
+        Args:
+            user_id: The user's database ID
+
+        Returns:
+            List[int]: List of entry_id values that have v1 (CBC) encrypted blobs
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT entry_id FROM passwords
+                    WHERE user_id = ? AND SUBSTR(password_encrypted, 1, 1) = x'01'
+                    ORDER BY entry_id
+                    """,
+                    (user_id,),
+                )
+                return [row["entry_id"] for row in cursor.fetchall()]
+
+        except Exception as e:
+            log_exception(logger, e, "Failed to get v1 entry IDs")
+            raise DatabaseException(
+                f"Failed to get entries for migration: {e}",
+                error_code="DB001",
+                user_message="Could not identify entries for encryption upgrade.",
+            )
+
     def get_password_entries_advanced(
         self,
         user_id: int,

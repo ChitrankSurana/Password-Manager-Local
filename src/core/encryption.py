@@ -8,32 +8,45 @@ using AES-256 encryption with PBKDF2 key derivation. It implements industry-stan
 cryptographic practices to ensure maximum security for stored passwords.
 
 Key Features:
-- AES-256-CBC encryption for maximum security
-- PBKDF2 key derivation with SHA-256 and 100,000+ iterations
-- Unique salt per password for enhanced security
-- Proper PKCS7 padding for block cipher compatibility
-- Constant-time operations to prevent timing attacks
+- AES-256-GCM authenticated encryption (v2 format, default since v3.0)
+- AES-256-CBC legacy support (v1 format, read-only for backward compatibility)
+- PBKDF2 key derivation with SHA-256 and 600,000 iterations (OWASP 2023+)
+- Unique salt and nonce/IV per encryption operation
+- Authenticated encryption prevents ciphertext tampering (padding oracle immune)
 - Memory-safe operations that clear sensitive data
 - Cryptographically secure random number generation
 
+Blob Formats:
+- v1 (legacy, read-only): VERSION(1=0x01) + SALT(32) + IV(16) + CIPHERTEXT
+  Uses AES-256-CBC with PKCS7 padding. No authentication tag.
+  Vulnerable to padding oracle attacks. Kept for backward compatibility only.
+
+- v2 (current): VERSION(1=0x02) + ITERATIONS(4 bytes big-endian) + SALT(32)
+                 + NONCE(12) + TAG(16) + CIPHERTEXT
+  Uses AES-256-GCM (Galois/Counter Mode) with authenticated encryption.
+  The TAG prevents any ciphertext tampering. ITERATIONS stored in blob
+  allows future-proof iteration upgrades without breaking existing data.
+
 Security Design:
-- Each password gets a unique salt and IV
+- Each password gets a unique salt and nonce
 - Master password is never stored, only derived keys are used
-- Quantum-resistant security with 256-bit keys
-- Protection against rainbow table attacks
-- Resistance to side-channel attacks
+- GCM mode provides both confidentiality and integrity (AEAD)
+- Protection against rainbow table attacks via per-entry salts
+- PBKDF2 with 600k iterations resists brute-force attacks
 
 Author: Personal Password Manager
-Version: 2.2.0
+Version: 3.0.0
 """
 
 import secrets
+import struct
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .error_handlers import handle_security_errors, monitor_performance
@@ -63,50 +76,87 @@ class PasswordEncryption:
     Main encryption class for the Personal Password Manager
 
     This class provides secure encryption and decryption of passwords using
-    AES-256-CBC with PBKDF2 key derivation. It follows cryptographic best
-    practices to ensure maximum security.
+    AES-256-GCM (default) with PBKDF2 key derivation. It maintains backward
+    compatibility with legacy AES-256-CBC (v1) encrypted data.
 
     Security Features:
-    - AES-256 encryption with CBC mode
-    - PBKDF2-HMAC-SHA256 key derivation with configurable iterations
-    - Unique salt and IV for each encryption operation
+    - AES-256-GCM authenticated encryption (prevents ciphertext tampering)
+    - PBKDF2-HMAC-SHA256 key derivation with 600,000 iterations
+    - Unique salt and nonce for each encryption operation
     - Secure random number generation using OS entropy
-    - Constant-time operations to prevent timing attacks
     - Memory clearing after use to prevent key leakage
 
-    Storage Format:
-    The encrypted data is stored as: VERSION(1) + SALT(32) + IV(16) + CIPHERTEXT(variable)
-    This allows for future upgrades and ensures all necessary data is preserved.
+    Blob Formats:
+    - v1 (0x01): VERSION + SALT(32) + IV(16) + CIPHERTEXT  [legacy CBC, read-only]
+    - v2 (0x02): VERSION + ITERATIONS(4) + SALT(32) + NONCE(12) + TAG(16) + CIPHERTEXT  [GCM]
     """
 
-    # Cryptographic constants
-    VERSION = b"\x01"  # Format version for future compatibility
-    SALT_LENGTH = 32  # 256 bits for salt
-    IV_LENGTH = 16  # 128 bits for AES IV
-    KEY_LENGTH = 32  # 256 bits for AES key
-    DEFAULT_ITERATIONS = 100000  # PBKDF2 iterations (OWASP recommended minimum)
+    # =========================================================================
+    # CRYPTOGRAPHIC CONSTANTS
+    # =========================================================================
 
-    # AES block size
-    BLOCK_SIZE = 16  # 128 bits
+    # Version bytes — used to distinguish blob formats during decryption.
+    # v1 blobs use AES-CBC (legacy), v2 blobs use AES-GCM (current).
+    VERSION_CBC = b"\x01"  # Legacy format: AES-256-CBC with PKCS7 padding
+    VERSION_GCM = b"\x02"  # Current format: AES-256-GCM authenticated encryption
+
+    # Keep VERSION as alias for legacy code that references it
+    VERSION = VERSION_CBC
+
+    # Key and salt sizes (shared between v1 and v2)
+    SALT_LENGTH = 32  # 256-bit salt for PBKDF2 key derivation
+    KEY_LENGTH = 32   # 256-bit key for AES-256
+
+    # v1 (CBC) specific constants — kept for backward compatibility
+    IV_LENGTH = 16    # 128-bit IV for AES-CBC mode
+    BLOCK_SIZE = 16   # 128-bit AES block size (needed for CBC padding)
+
+    # v2 (GCM) specific constants
+    # GCM uses a 96-bit (12-byte) nonce as recommended by NIST SP 800-38D.
+    # Shorter nonces are faster and the standard explicitly recommends 96 bits.
+    GCM_NONCE_LENGTH = 12
+    # GCM produces a 128-bit (16-byte) authentication tag that proves the
+    # ciphertext has not been tampered with. Any modification to the ciphertext,
+    # nonce, or additional data will cause tag verification to fail.
+    GCM_TAG_LENGTH = 16
+    # Size of the iteration count field in the v2 blob header (4 bytes, big-endian uint32).
+    # Storing iterations in the blob allows us to upgrade the iteration count
+    # without breaking existing encrypted data — each blob knows its own cost.
+    ITERATIONS_FIELD_LENGTH = 4
+
+    # PBKDF2 iteration counts
+    # 600,000 is the OWASP 2023+ recommendation for PBKDF2-HMAC-SHA256.
+    # Previous default was 100,000 (OWASP 2017 minimum). We keep 100,000 as the
+    # fallback for decrypting legacy v1 blobs that don't store their iteration count.
+    DEFAULT_ITERATIONS = 600000
+    LEGACY_ITERATIONS = 100000  # Used when decrypting v1 blobs
 
     def __init__(self, pbkdf2_iterations: OptionalInt = None) -> None:
         """
-        Initialize the encryption system
+        Initialize the encryption system.
 
         Args:
-            pbkdf2_iterations (int, optional): Number of PBKDF2 iterations
-                                             Defaults to 100,000 for security
+            pbkdf2_iterations: Number of PBKDF2 iterations for key derivation.
+                Defaults to 600,000 (OWASP 2023+ recommendation).
+                Higher values are more secure but slower.
         """
         self.pbkdf2_iterations: int = pbkdf2_iterations or self.DEFAULT_ITERATIONS
 
-        # Validate iteration count for security
-        if self.pbkdf2_iterations < 10000:
-            logger.warning("Low PBKDF2 iteration count may be insecure")
-        elif self.pbkdf2_iterations > 1000000:
-            logger.warning("High PBKDF2 iteration count may impact performance")
+        # Warn about potentially insecure or very slow iteration counts
+        if self.pbkdf2_iterations < 100000:
+            logger.warning(
+                f"PBKDF2 iteration count {self.pbkdf2_iterations} is below the "
+                "recommended minimum of 600,000. This weakens brute-force resistance."
+            )
+        elif self.pbkdf2_iterations > 2000000:
+            logger.warning(
+                f"PBKDF2 iteration count {self.pbkdf2_iterations} is very high. "
+                "Key derivation may take several seconds per operation."
+            )
 
         logger.info(
-            f"Encryption system initialized with {self.pbkdf2_iterations} PBKDF2 iterations"
+            f"Encryption system initialized: AES-256-GCM, "
+            f"PBKDF2 iterations={self.pbkdf2_iterations}"
         )
 
     def generate_salt(self) -> bytes:
@@ -131,16 +181,15 @@ class PasswordEncryption:
 
     def generate_iv(self) -> bytes:
         """
-        Generate a cryptographically secure random initialization vector (IV)
+        Generate a cryptographically secure random initialization vector (IV).
 
-        The IV ensures that identical plaintexts produce different ciphertexts,
-        preventing pattern analysis attacks.
+        Used only for legacy v1 (CBC) operations. New v2 (GCM) operations
+        use generate_nonce() instead.
 
         Returns:
-            bytes: 16-byte random IV for AES
+            bytes: 16-byte random IV for AES-CBC
         """
         try:
-            # Generate random IV using OS entropy
             iv = secrets.token_bytes(self.IV_LENGTH)
             logger.debug(f"Generated {len(iv)}-byte IV")
             return iv
@@ -148,6 +197,27 @@ class PasswordEncryption:
         except Exception as e:
             logger.error(f"Failed to generate IV: {e}")
             raise EncryptionError(f"IV generation failed: {e}")
+
+    def generate_nonce(self) -> bytes:
+        """
+        Generate a cryptographically secure random nonce for AES-GCM.
+
+        AES-GCM requires a 96-bit (12-byte) nonce per NIST SP 800-38D.
+        Each nonce MUST be unique for a given key. Since we derive a unique
+        key per encryption (unique salt), nonce reuse across entries is safe,
+        but we still use random nonces for defense-in-depth.
+
+        Returns:
+            bytes: 12-byte random nonce for AES-GCM
+        """
+        try:
+            nonce = secrets.token_bytes(self.GCM_NONCE_LENGTH)
+            logger.debug(f"Generated {len(nonce)}-byte GCM nonce")
+            return nonce
+
+        except Exception as e:
+            logger.error(f"Failed to generate nonce: {e}")
+            raise EncryptionError(f"Nonce generation failed: {e}")
 
     def derive_key(
         self, master_password: str, salt: bytes, iterations: OptionalInt = None
@@ -208,27 +278,33 @@ class PasswordEncryption:
             raise InvalidKeyError(f"Key derivation failed: {e}")
 
     @handle_security_errors("Password encryption failed")
-    @monitor_performance(threshold_ms=2000)  # Alert if encryption takes > 2s
+    @monitor_performance(threshold_ms=4000)  # GCM + 600k PBKDF2 may take a few seconds
     def encrypt_password(self, plaintext_password: str, master_password: str) -> bytes:
         """
-        Encrypt a password using AES-256-CBC with PBKDF2 key derivation
+        Encrypt a password using AES-256-GCM with PBKDF2 key derivation (v2 format).
 
-        This method performs the complete encryption process:
-        1. Generate unique salt and IV
-        2. Derive encryption key from master password
-        3. Pad plaintext using PKCS7
-        4. Encrypt using AES-256-CBC
-        5. Combine all components for storage
+        AES-GCM (Galois/Counter Mode) provides authenticated encryption — it produces
+        both ciphertext and an authentication tag. The tag ensures that any tampering
+        with the ciphertext, nonce, or associated data will be detected during
+        decryption, making this immune to padding oracle attacks that affected the
+        old CBC mode.
+
+        Process:
+        1. Generate unique salt (32 bytes) and nonce (12 bytes)
+        2. Derive 256-bit encryption key via PBKDF2-HMAC-SHA256 (600k iterations)
+        3. Encrypt plaintext using AES-256-GCM (no padding needed — GCM is streaming)
+        4. Retrieve 16-byte authentication tag from GCM
+        5. Pack into v2 blob: VERSION(0x02) + ITERATIONS(4) + SALT(32) + NONCE(12) + TAG(16) + CIPHERTEXT
 
         Args:
-            plaintext_password (str): Password to encrypt
-            master_password (str): User's master password for key derivation
+            plaintext_password: Password to encrypt (must be non-empty)
+            master_password: User's master password for key derivation
 
         Returns:
-            bytes: Encrypted data blob containing version, salt, IV, and ciphertext
+            bytes: v2 encrypted blob containing all components needed for decryption
 
         Raises:
-            EncryptionError: If encryption fails
+            EncryptionError: If encryption fails for any reason
         """
         if not plaintext_password:
             raise EncryptionError("Plaintext password cannot be empty")
@@ -237,42 +313,66 @@ class PasswordEncryption:
             raise EncryptionError("Master password cannot be empty")
 
         try:
-            # Generate unique salt and IV for this encryption
+            # Step 1: Generate unique random salt and nonce for this encryption.
+            # Each entry gets its own salt, so even identical passwords produce
+            # completely different ciphertexts.
             salt = self.generate_salt()
-            iv = self.generate_iv()
+            nonce = self.generate_nonce()
 
-            # Derive encryption key from master password
+            # Step 2: Derive a 256-bit encryption key from the master password.
+            # PBKDF2 with 600k iterations makes brute-force attacks expensive
+            # (~1-2 seconds per attempt on modern hardware).
             encryption_key = self.derive_key(master_password, salt)
 
-            # Convert plaintext to bytes
+            # Step 3: Convert plaintext to bytes. GCM does not require padding
+            # (unlike CBC), so we encrypt the raw bytes directly.
             plaintext_bytes = plaintext_password.encode("utf-8")
 
-            # Apply PKCS7 padding to ensure proper block size
-            padder = padding.PKCS7(self.BLOCK_SIZE * 8).padder()  # bits not bytes
-            padded_data = padder.update(plaintext_bytes)
-            padded_data += padder.finalize()
-
-            # Create AES cipher in CBC mode
+            # Step 4: Encrypt using AES-256-GCM.
+            # GCM provides both confidentiality (encryption) and integrity
+            # (authentication tag). The tag is a cryptographic MAC that covers
+            # both the ciphertext and any additional authenticated data (AAD).
             cipher = Cipher(
                 algorithm=algorithms.AES(encryption_key),
-                mode=modes.CBC(iv),
+                mode=modes.GCM(nonce),
                 backend=default_backend(),
             )
             encryptor = cipher.encryptor()
+            ciphertext = encryptor.update(plaintext_bytes) + encryptor.finalize()
 
-            # Perform encryption
-            ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+            # Step 5: Retrieve the GCM authentication tag.
+            # This 16-byte tag MUST be stored alongside the ciphertext.
+            # During decryption, the tag is verified — if the ciphertext or nonce
+            # has been modified, decryption will fail with InvalidTag.
+            tag = encryptor.tag
 
-            # Combine version, salt, IV, and ciphertext for storage
-            # Format: VERSION(1) + SALT(32) + IV(16) + CIPHERTEXT(variable)
-            encrypted_blob = self.VERSION + salt + iv + ciphertext
+            # Step 6: Pack the iteration count as 4-byte big-endian unsigned integer.
+            # Storing iterations in the blob means we can upgrade the iteration count
+            # in the future without breaking existing encrypted entries — each blob
+            # is self-describing.
+            iterations_bytes = struct.pack(">I", self.pbkdf2_iterations)
 
-            # Clear sensitive data from memory
+            # Step 7: Assemble the v2 encrypted blob.
+            # Format: VERSION(1) + ITERATIONS(4) + SALT(32) + NONCE(12) + TAG(16) + CIPHERTEXT
+            # Total overhead: 1 + 4 + 32 + 12 + 16 = 65 bytes before ciphertext
+            encrypted_blob = (
+                self.VERSION_GCM
+                + iterations_bytes
+                + salt
+                + nonce
+                + tag
+                + ciphertext
+            )
+
+            # Step 8: Best-effort memory clearing of sensitive data.
+            # Python's garbage collector may retain copies, but overwriting the
+            # local variable references is better than leaving them as-is.
             encryption_key = b"\x00" * len(encryption_key)
             plaintext_bytes = b"\x00" * len(plaintext_bytes)
-            padded_data = b"\x00" * len(padded_data)
 
-            logger.debug(f"Password encrypted successfully, blob size: {len(encrypted_blob)} bytes")
+            logger.debug(
+                f"Password encrypted (v2/GCM), blob size: {len(encrypted_blob)} bytes"
+            )
             return encrypted_blob
 
         except (EncryptionError, InvalidKeyError):
@@ -282,28 +382,30 @@ class PasswordEncryption:
             raise EncryptionError(f"Encryption failed: {e}")
 
     @handle_security_errors("Password decryption failed")
-    @monitor_performance(threshold_ms=2000)  # Alert if decryption takes > 2s
+    @monitor_performance(threshold_ms=4000)  # 600k PBKDF2 takes ~1-2s
     def decrypt_password(self, encrypted_blob: bytes, master_password: str) -> str:
         """
-        Decrypt a password using AES-256-CBC with PBKDF2 key derivation
+        Decrypt a password, automatically detecting the blob format (v1 or v2).
 
-        This method performs the complete decryption process:
-        1. Parse encrypted blob to extract components
-        2. Derive decryption key from master password and salt
-        3. Decrypt ciphertext using AES-256-CBC
-        4. Remove PKCS7 padding
-        5. Return plaintext password
+        This method reads the version byte from the blob header and dispatches to
+        the appropriate decryption logic:
+        - v1 (0x01): Legacy AES-256-CBC with PKCS7 padding (backward compatibility)
+        - v2 (0x02): AES-256-GCM authenticated encryption (current format)
+
+        For v2 blobs, the GCM authentication tag is verified BEFORE returning the
+        plaintext. If the ciphertext has been tampered with, decryption will fail
+        with an InvalidTag exception, which is caught and raised as DecryptionError.
 
         Args:
-            encrypted_blob (bytes): Encrypted data blob from encrypt_password()
-            master_password (str): User's master password for key derivation
+            encrypted_blob: Encrypted data blob from encrypt_password()
+            master_password: User's master password for key derivation
 
         Returns:
             str: Decrypted plaintext password
 
         Raises:
-            DecryptionError: If decryption fails
-            CorruptedDataError: If encrypted data is corrupted
+            DecryptionError: If decryption fails (wrong password, tampered data, etc.)
+            CorruptedDataError: If the blob format is invalid or corrupted
         """
         if not encrypted_blob:
             raise DecryptionError("Encrypted blob cannot be empty")
@@ -312,67 +414,24 @@ class PasswordEncryption:
             raise DecryptionError("Master password cannot be empty")
 
         try:
-            # Validate minimum blob size
-            min_size = len(self.VERSION) + self.SALT_LENGTH + self.IV_LENGTH + self.BLOCK_SIZE
-            if len(encrypted_blob) < min_size:
+            # Read the version byte to determine which format to use.
+            # The version byte is always the first byte of the blob.
+            if len(encrypted_blob) < 1:
+                raise CorruptedDataError("Encrypted blob is empty")
+
+            version = encrypted_blob[0:1]
+
+            if version == self.VERSION_CBC:
+                # v1 format: AES-256-CBC (legacy, kept for backward compatibility)
+                return self._decrypt_v1_cbc(encrypted_blob, master_password)
+            elif version == self.VERSION_GCM:
+                # v2 format: AES-256-GCM authenticated encryption (current)
+                return self._decrypt_v2_gcm(encrypted_blob, master_password)
+            else:
                 raise CorruptedDataError(
-                    f"Encrypted blob too short: {len(encrypted_blob)} < {min_size}"
+                    f"Unknown blob version: 0x{version.hex()}. "
+                    "Expected 0x01 (CBC) or 0x02 (GCM)."
                 )
-
-            # Parse encrypted blob components
-            offset = 0
-
-            # Extract version
-            version = encrypted_blob[offset : offset + len(self.VERSION)]
-            offset += len(self.VERSION)
-
-            if version != self.VERSION:
-                raise CorruptedDataError(f"Unsupported version: {version.hex()}")
-
-            # Extract salt
-            salt = encrypted_blob[offset : offset + self.SALT_LENGTH]
-            offset += self.SALT_LENGTH
-
-            # Extract IV
-            iv = encrypted_blob[offset : offset + self.IV_LENGTH]
-            offset += self.IV_LENGTH
-
-            # Extract ciphertext
-            ciphertext = encrypted_blob[offset:]
-
-            # Validate ciphertext length (must be multiple of block size)
-            if len(ciphertext) % self.BLOCK_SIZE != 0:
-                raise CorruptedDataError("Invalid ciphertext length - not multiple of block size")
-
-            # Derive decryption key using the same parameters
-            decryption_key = self.derive_key(master_password, salt)
-
-            # Create AES cipher in CBC mode
-            cipher = Cipher(
-                algorithm=algorithms.AES(decryption_key),
-                mode=modes.CBC(iv),
-                backend=default_backend(),
-            )
-            decryptor = cipher.decryptor()
-
-            # Perform decryption
-            padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-
-            # Remove PKCS7 padding
-            unpadder = padding.PKCS7(self.BLOCK_SIZE * 8).unpadder()
-            plaintext_bytes = unpadder.update(padded_plaintext)
-            plaintext_bytes += unpadder.finalize()
-
-            # Convert back to string
-            plaintext_password = plaintext_bytes.decode("utf-8")
-
-            # Clear sensitive data from memory
-            decryption_key = b"\x00" * len(decryption_key)
-            padded_plaintext = b"\x00" * len(padded_plaintext)
-            plaintext_bytes = b"\x00" * len(plaintext_bytes)
-
-            logger.debug("Password decrypted successfully")
-            return plaintext_password
 
         except (DecryptionError, CorruptedDataError, InvalidKeyError):
             raise
@@ -381,6 +440,178 @@ class PasswordEncryption:
         except Exception as e:
             logger.error(f"Decryption failed: {e}")
             raise DecryptionError(f"Decryption failed: {e}")
+
+    def _decrypt_v1_cbc(self, encrypted_blob: bytes, master_password: str) -> str:
+        """
+        Decrypt a v1 (AES-256-CBC) blob. Legacy format — read-only support.
+
+        v1 blob format: VERSION(1=0x01) + SALT(32) + IV(16) + CIPHERTEXT
+        Uses PKCS7 padding and the legacy 100,000 PBKDF2 iterations.
+
+        WARNING: This format has NO authentication tag, making it vulnerable to
+        padding oracle attacks. All v1 blobs should be migrated to v2 (GCM)
+        using migrate_entry_to_gcm().
+
+        Args:
+            encrypted_blob: v1 encrypted blob
+            master_password: Master password for key derivation
+
+        Returns:
+            str: Decrypted plaintext password
+        """
+        # Minimum size: version(1) + salt(32) + iv(16) + one_block(16) = 65
+        min_size = 1 + self.SALT_LENGTH + self.IV_LENGTH + self.BLOCK_SIZE
+        if len(encrypted_blob) < min_size:
+            raise CorruptedDataError(
+                f"v1 blob too short: {len(encrypted_blob)} < {min_size}"
+            )
+
+        # Parse v1 blob components
+        offset = 1  # Skip version byte (already validated)
+
+        salt = encrypted_blob[offset:offset + self.SALT_LENGTH]
+        offset += self.SALT_LENGTH
+
+        iv = encrypted_blob[offset:offset + self.IV_LENGTH]
+        offset += self.IV_LENGTH
+
+        ciphertext = encrypted_blob[offset:]
+
+        # CBC ciphertext must be a multiple of the block size
+        if len(ciphertext) % self.BLOCK_SIZE != 0:
+            raise CorruptedDataError(
+                "v1 ciphertext length is not a multiple of block size"
+            )
+
+        # Derive key using legacy iteration count (100,000).
+        # v1 blobs don't store their iteration count, so we use the hardcoded legacy value.
+        decryption_key = self.derive_key(
+            master_password, salt, iterations=self.LEGACY_ITERATIONS
+        )
+
+        # Decrypt using AES-256-CBC
+        cipher = Cipher(
+            algorithm=algorithms.AES(decryption_key),
+            mode=modes.CBC(iv),
+            backend=default_backend(),
+        )
+        decryptor = cipher.decryptor()
+        padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+        # Remove PKCS7 padding
+        unpadder = padding.PKCS7(self.BLOCK_SIZE * 8).unpadder()
+        plaintext_bytes = unpadder.update(padded_plaintext)
+        plaintext_bytes += unpadder.finalize()
+
+        # Convert to string
+        plaintext_password = plaintext_bytes.decode("utf-8")
+
+        # Clear sensitive data
+        decryption_key = b"\x00" * len(decryption_key)
+        padded_plaintext = b"\x00" * len(padded_plaintext)
+        plaintext_bytes = b"\x00" * len(plaintext_bytes)
+
+        logger.debug("Password decrypted (v1/CBC legacy format)")
+        return plaintext_password
+
+    def _decrypt_v2_gcm(self, encrypted_blob: bytes, master_password: str) -> str:
+        """
+        Decrypt a v2 (AES-256-GCM) blob with authenticated encryption.
+
+        v2 blob format: VERSION(1=0x02) + ITERATIONS(4) + SALT(32) + NONCE(12) + TAG(16) + CIPHERTEXT
+
+        The GCM authentication tag is verified during decryption. If the ciphertext
+        or any header field has been modified, the cryptography library raises
+        InvalidTag, which we convert to a DecryptionError. This makes v2 immune
+        to padding oracle attacks and any form of ciphertext tampering.
+
+        Args:
+            encrypted_blob: v2 encrypted blob
+            master_password: Master password for key derivation
+
+        Returns:
+            str: Decrypted plaintext password
+        """
+        # Minimum size: version(1) + iterations(4) + salt(32) + nonce(12) + tag(16) + at_least_1_byte = 66
+        min_size = (
+            1
+            + self.ITERATIONS_FIELD_LENGTH
+            + self.SALT_LENGTH
+            + self.GCM_NONCE_LENGTH
+            + self.GCM_TAG_LENGTH
+            + 1  # At least 1 byte of ciphertext
+        )
+        if len(encrypted_blob) < min_size:
+            raise CorruptedDataError(
+                f"v2 blob too short: {len(encrypted_blob)} < {min_size}"
+            )
+
+        # Parse v2 blob components
+        offset = 1  # Skip version byte (already validated)
+
+        # Read iteration count from blob header.
+        # This is a 4-byte big-endian unsigned integer, allowing up to ~4.3 billion iterations.
+        iterations_bytes = encrypted_blob[offset:offset + self.ITERATIONS_FIELD_LENGTH]
+        iterations = struct.unpack(">I", iterations_bytes)[0]
+        offset += self.ITERATIONS_FIELD_LENGTH
+
+        # Validate iterations is reasonable (prevent corrupt data from causing hangs)
+        if iterations < 1000 or iterations > 10_000_000:
+            raise CorruptedDataError(
+                f"Unreasonable iteration count in blob: {iterations}"
+            )
+
+        salt = encrypted_blob[offset:offset + self.SALT_LENGTH]
+        offset += self.SALT_LENGTH
+
+        nonce = encrypted_blob[offset:offset + self.GCM_NONCE_LENGTH]
+        offset += self.GCM_NONCE_LENGTH
+
+        tag = encrypted_blob[offset:offset + self.GCM_TAG_LENGTH]
+        offset += self.GCM_TAG_LENGTH
+
+        ciphertext = encrypted_blob[offset:]
+
+        if len(ciphertext) == 0:
+            raise CorruptedDataError("v2 blob has empty ciphertext")
+
+        # Derive the decryption key using the iteration count stored in the blob.
+        # This means each blob is self-describing — we can upgrade iteration counts
+        # without breaking old entries.
+        decryption_key = self.derive_key(master_password, salt, iterations=iterations)
+
+        # Decrypt using AES-256-GCM with the authentication tag.
+        # The tag is passed to the GCM mode constructor and verified during finalize().
+        # If the ciphertext has been tampered with, finalize() raises InvalidTag.
+        try:
+            cipher = Cipher(
+                algorithm=algorithms.AES(decryption_key),
+                mode=modes.GCM(nonce, tag),
+                backend=default_backend(),
+            )
+            decryptor = cipher.decryptor()
+            plaintext_bytes = decryptor.update(ciphertext) + decryptor.finalize()
+        except Exception as e:
+            # GCM tag verification failure indicates either wrong password or
+            # tampered ciphertext. We raise DecryptionError for both cases
+            # to avoid leaking information about which one occurred.
+            error_msg = str(e).lower()
+            if "tag" in error_msg or "authentication" in error_msg:
+                raise DecryptionError(
+                    "Decryption failed: authentication tag mismatch. "
+                    "Wrong password or corrupted data."
+                )
+            raise
+
+        # Convert to string (no unpadding needed — GCM is a streaming cipher)
+        plaintext_password = plaintext_bytes.decode("utf-8")
+
+        # Clear sensitive data
+        decryption_key = b"\x00" * len(decryption_key)
+        plaintext_bytes = b"\x00" * len(plaintext_bytes)
+
+        logger.debug("Password decrypted (v2/GCM authenticated)")
+        return plaintext_password
 
     @handle_security_errors("Master password change failed")
     @monitor_performance(threshold_ms=4000)  # Two crypto operations, allow more time
@@ -450,18 +681,85 @@ class PasswordEncryption:
         except Exception:
             return False
 
-    def get_encryption_info(self, encrypted_blob: bytes) -> Dict[str, Any]:
+    def migrate_entry_to_gcm(
+        self, encrypted_blob: bytes, master_password: str
+    ) -> bytes:
         """
-        Extract metadata from an encrypted blob without decrypting
+        Migrate an encrypted entry from v1 (CBC) format to v2 (GCM) format.
 
-        Provides information about the encryption format and parameters
-        without requiring the master password.
+        This method decrypts the v1 blob using the legacy CBC mode, then
+        re-encrypts the plaintext using the current GCM mode with the updated
+        PBKDF2 iteration count. The result is a fully authenticated v2 blob.
+
+        If the blob is already v2 (GCM), it is returned unchanged — this makes
+        the method safe to call on any entry without checking the version first.
 
         Args:
-            encrypted_blob (bytes): Encrypted data blob
+            encrypted_blob: The encrypted password blob (v1 or v2 format)
+            master_password: The user's master password
 
         Returns:
-            dict: Metadata about the encryption
+            bytes: v2 (GCM) encrypted blob, or the original blob if already v2
+
+        Raises:
+            DecryptionError: If decryption of the v1 blob fails
+            EncryptionError: If re-encryption to v2 fails
+        """
+        # If already v2, no migration needed
+        if encrypted_blob and encrypted_blob[0:1] == self.VERSION_GCM:
+            logger.debug("Entry already in v2 (GCM) format, skipping migration")
+            return encrypted_blob
+
+        # Decrypt with v1 (CBC) format using legacy iterations
+        plaintext = self.decrypt_password(encrypted_blob, master_password)
+
+        # Re-encrypt with v2 (GCM) format using current iterations
+        new_blob = self.encrypt_password(plaintext, master_password)
+
+        # Clear plaintext from memory
+        plaintext = "\x00" * len(plaintext)
+
+        logger.debug("Entry migrated from v1 (CBC) to v2 (GCM)")
+        return new_blob
+
+    def get_blob_version(self, encrypted_blob: bytes) -> int:
+        """
+        Get the version number of an encrypted blob without decrypting.
+
+        Useful for quickly checking whether an entry needs migration.
+
+        Args:
+            encrypted_blob: The encrypted password blob
+
+        Returns:
+            int: Version number (1 for CBC, 2 for GCM)
+
+        Raises:
+            CorruptedDataError: If the blob is empty or has an unknown version
+        """
+        if not encrypted_blob or len(encrypted_blob) < 1:
+            raise CorruptedDataError("Encrypted blob is empty")
+
+        version_byte = encrypted_blob[0:1]
+        if version_byte == self.VERSION_CBC:
+            return 1
+        elif version_byte == self.VERSION_GCM:
+            return 2
+        else:
+            raise CorruptedDataError(f"Unknown version byte: 0x{version_byte.hex()}")
+
+    def get_encryption_info(self, encrypted_blob: bytes) -> Dict[str, Any]:
+        """
+        Extract metadata from an encrypted blob without decrypting.
+
+        Provides information about the encryption format, version, and parameters
+        without requiring the master password. Supports both v1 and v2 formats.
+
+        Args:
+            encrypted_blob: Encrypted data blob
+
+        Returns:
+            dict: Metadata including version, algorithm, sizes, and iterations
 
         Raises:
             CorruptedDataError: If blob format is invalid
@@ -470,23 +768,63 @@ class PasswordEncryption:
             raise CorruptedDataError("Encrypted blob cannot be empty")
 
         try:
-            min_size = len(self.VERSION) + self.SALT_LENGTH + self.IV_LENGTH
-            if len(encrypted_blob) < min_size:
-                raise CorruptedDataError("Encrypted blob too short")
+            version_byte = encrypted_blob[0:1]
 
-            # Extract version
-            version = encrypted_blob[0 : len(self.VERSION)]
+            if version_byte == self.VERSION_CBC:
+                # v1 format: VERSION(1) + SALT(32) + IV(16) + CIPHERTEXT
+                min_size = 1 + self.SALT_LENGTH + self.IV_LENGTH
+                if len(encrypted_blob) < min_size:
+                    raise CorruptedDataError("v1 blob too short for metadata")
 
-            return {
-                "version": version.hex(),
-                "version_supported": version == self.VERSION,
-                "total_size": len(encrypted_blob),
-                "ciphertext_size": len(encrypted_blob) - min_size,
-                "salt_length": self.SALT_LENGTH,
-                "iv_length": self.IV_LENGTH,
-                "estimated_iterations": self.pbkdf2_iterations,
-            }
+                return {
+                    "version": 1,
+                    "version_hex": version_byte.hex(),
+                    "algorithm": "AES-256-CBC",
+                    "authenticated": False,
+                    "total_size": len(encrypted_blob),
+                    "ciphertext_size": len(encrypted_blob) - min_size,
+                    "salt_length": self.SALT_LENGTH,
+                    "iv_length": self.IV_LENGTH,
+                    "iterations": self.LEGACY_ITERATIONS,
+                    "needs_migration": True,
+                }
 
+            elif version_byte == self.VERSION_GCM:
+                # v2 format: VERSION(1) + ITERATIONS(4) + SALT(32) + NONCE(12) + TAG(16) + CIPHERTEXT
+                header_size = (
+                    1 + self.ITERATIONS_FIELD_LENGTH + self.SALT_LENGTH
+                    + self.GCM_NONCE_LENGTH + self.GCM_TAG_LENGTH
+                )
+                if len(encrypted_blob) < header_size:
+                    raise CorruptedDataError("v2 blob too short for metadata")
+
+                # Read iteration count from the blob
+                iterations = struct.unpack(
+                    ">I",
+                    encrypted_blob[1:1 + self.ITERATIONS_FIELD_LENGTH],
+                )[0]
+
+                return {
+                    "version": 2,
+                    "version_hex": version_byte.hex(),
+                    "algorithm": "AES-256-GCM",
+                    "authenticated": True,
+                    "total_size": len(encrypted_blob),
+                    "ciphertext_size": len(encrypted_blob) - header_size,
+                    "salt_length": self.SALT_LENGTH,
+                    "nonce_length": self.GCM_NONCE_LENGTH,
+                    "tag_length": self.GCM_TAG_LENGTH,
+                    "iterations": iterations,
+                    "needs_migration": False,
+                }
+
+            else:
+                raise CorruptedDataError(
+                    f"Unknown version: 0x{version_byte.hex()}"
+                )
+
+        except CorruptedDataError:
+            raise
         except Exception as e:
             logger.error(f"Failed to extract encryption info: {e}")
             raise CorruptedDataError(f"Invalid encryption format: {e}")
@@ -525,7 +863,7 @@ def benchmark_encryption_performance(
         dict: Performance results for each iteration count
     """
     if iterations_list is None:
-        iterations_list = [10000, 50000, 100000, 200000, 500000]
+        iterations_list = [100000, 200000, 400000, 600000, 1000000]
 
     results = {}
     test_password = "This is a test password for benchmarking purposes"

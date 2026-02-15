@@ -39,7 +39,7 @@ class PasswordCache:
     def __init__(
         self,
         max_size: int = 1000,
-        ttl_seconds: int = 300,  # 5 minutes default
+        ttl_seconds: int = 60,  # 1 minute default (reduced from 5 min for security)
         enable_metrics: bool = True,
     ):
         """
@@ -47,7 +47,11 @@ class PasswordCache:
 
         Args:
             max_size: Maximum number of entries to cache
-            ttl_seconds: Time-to-live for cached entries (seconds)
+            ttl_seconds: Time-to-live for cached entries (seconds).
+                Defaults to 60s. A shorter TTL limits the window during
+                which stale data could be served after a password change
+                or deletion, and reduces the time sensitive metadata
+                remains in memory.
             enable_metrics: Enable performance metrics tracking
         """
         self.max_size = max_size
@@ -121,6 +125,14 @@ class PasswordCache:
         """
         Store password entries in cache
 
+        SECURITY: Before caching, any decrypted password field is stripped
+        from the entries. The cache should only hold metadata (website,
+        username, timestamps, etc.) — never plaintext secrets. Callers
+        that need the actual password must decrypt on demand from the
+        database. This is a defense-in-depth measure: even if the cache
+        is somehow dumped (e.g., via a memory inspection attack), no
+        plaintext passwords are exposed.
+
         Args:
             user_id: User ID
             cache_key: Cache key
@@ -141,8 +153,23 @@ class PasswordCache:
                 self._metrics["evictions"] += 1
                 logger.debug(f"Evicted cache entry for user {user_id}, key: {evicted_key}")
 
-            # Add entry
-            user_cache[cache_key] = {"data": data, "timestamp": time.time(), "access_count": 0}
+            # SECURITY: Strip the decrypted 'password' field from each entry
+            # before storing in the cache. We replace it with an empty string
+            # so the PasswordEntry structure remains valid but contains no
+            # sensitive data. The caller's original list is not mutated — we
+            # create shallow copies of each entry dict.
+            sanitized_data = []
+            for entry in data:
+                safe_entry = dict(entry)
+                safe_entry["password"] = ""
+                sanitized_data.append(safe_entry)
+
+            # Add entry with sanitized data
+            user_cache[cache_key] = {
+                "data": sanitized_data,
+                "timestamp": time.time(),
+                "access_count": 0,
+            }
 
             logger.debug(f"Cache set for user {user_id}, key: {cache_key}, entries: {len(data)}")
 
@@ -337,13 +364,13 @@ class CacheKeyBuilder:
 
 
 # Factory function
-def create_password_cache(max_size: int = 1000, ttl_seconds: int = 300) -> PasswordCache:
+def create_password_cache(max_size: int = 1000, ttl_seconds: int = 60) -> PasswordCache:
     """
     Create a password cache instance
 
     Args:
         max_size: Maximum cache size
-        ttl_seconds: Time-to-live for cached entries
+        ttl_seconds: Time-to-live for cached entries (default: 60s)
 
     Returns:
         PasswordCache instance

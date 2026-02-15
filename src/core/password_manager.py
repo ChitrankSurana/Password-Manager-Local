@@ -31,6 +31,7 @@ Version: 2.2.0
 """
 
 import hashlib
+import hmac
 import logging
 import re
 import threading
@@ -50,6 +51,14 @@ from .auth import (
 from .encryption import DecryptionError, EncryptionError
 from .password_cache import CacheKeyBuilder, PasswordCache
 from .performance_monitor import PerformanceMonitor, PerformanceTracker
+
+# Age utilities for filtering and sorting by password age
+try:
+    from ..utils.password_age import calculate_age_days, get_age_category
+
+    _HAS_AGE_UTILS = True
+except ImportError:
+    _HAS_AGE_UTILS = False
 
 # Configure logging for password management operations
 logging.basicConfig(level=logging.INFO)
@@ -871,6 +880,168 @@ class PasswordManagerCore:
             logger.error(f"Failed to delete password entry {entry_id}: {e}")
             raise PasswordManagerError(f"Deletion failed: {e}")
 
+    # =========================================================================
+    # ENCRYPTION MIGRATION (v1 CBC → v2 GCM)
+    # =========================================================================
+
+    def needs_encryption_migration(self, session_id: str) -> bool:
+        """
+        Check if the logged-in user has any password entries still encrypted
+        with the legacy v1 (AES-CBC) format that need migration to v2 (AES-GCM).
+
+        This is called after login to determine whether to show the migration
+        progress dialog. It's a fast check — reads only the version byte of each
+        entry's encrypted blob, not the full data.
+
+        Args:
+            session_id: Valid session token
+
+        Returns:
+            bool: True if migration is needed, False if all entries are already v2
+        """
+        try:
+            session = self.auth_manager.validate_session(session_id)
+            return self.auth_manager.db_manager.needs_encryption_migration(
+                session.user_id
+            )
+        except (InvalidSessionError, SessionExpiredError):
+            raise
+        except Exception as e:
+            logger.error(f"Failed to check migration status: {e}")
+            return False
+
+    def migrate_all_entries_to_gcm(
+        self,
+        session_id: str,
+        master_password: str,
+        progress_callback: Optional[callable] = None,
+    ) -> int:
+        """
+        Migrate all of a user's password entries from v1 (AES-CBC) to v2 (AES-GCM).
+
+        This is the core migration method called after login when
+        needs_encryption_migration() returns True. It:
+        1. Identifies all v1 entries via their version byte
+        2. For each entry: decrypts with CBC (100k iterations), re-encrypts with
+           GCM (600k iterations), and updates the database
+        3. Reports progress via the callback for UI progress bars
+        4. Runs in a single transaction — if ANY entry fails, ALL changes roll back
+
+        The transaction-based approach ensures data integrity: either all entries
+        are migrated or none are. Users can retry the migration if it fails.
+
+        Args:
+            session_id: Valid session token
+            master_password: The user's master password (needed to decrypt/re-encrypt)
+            progress_callback: Optional function called as progress_callback(current, total)
+                after each entry is processed. Used by the UI for progress bars.
+
+        Returns:
+            int: Number of entries successfully migrated
+
+        Raises:
+            InvalidSessionError: If session is invalid
+            MasterPasswordRequiredError: If master password is incorrect
+            PasswordManagerError: If migration fails (all changes are rolled back)
+        """
+        try:
+            # Step 1: Validate session and master password
+            session = self.auth_manager.validate_session(session_id)
+
+            # Verify master password is correct before starting migration.
+            # We do this upfront to avoid partial migration with a wrong password.
+            if not self._verify_master_password(session_id, master_password):
+                raise MasterPasswordRequiredError(
+                    "Invalid master password. Migration requires the correct "
+                    "master password to decrypt and re-encrypt entries."
+                )
+
+            # Step 2: Get list of entry IDs that need migration
+            v1_entry_ids = self.auth_manager.db_manager.get_v1_entry_ids(
+                session.user_id
+            )
+
+            if not v1_entry_ids:
+                logger.info("No entries need migration — all already v2 (GCM)")
+                if progress_callback:
+                    progress_callback(0, 0)
+                return 0
+
+            total = len(v1_entry_ids)
+            logger.info(
+                f"Starting encryption migration for user {session.user_id}: "
+                f"{total} entries to migrate (v1/CBC → v2/GCM)"
+            )
+
+            # Step 3: Migrate entries within a single database transaction.
+            # If any entry fails, the entire transaction rolls back — no partial
+            # migration can occur.
+            migrated_count = 0
+            encryption = session.encryption_system
+
+            with self.auth_manager.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+
+                for i, entry_id in enumerate(v1_entry_ids):
+                    # Fetch the current encrypted blob for this entry
+                    cursor.execute(
+                        "SELECT password_encrypted FROM passwords "
+                        "WHERE entry_id = ? AND user_id = ?",
+                        (entry_id, session.user_id),
+                    )
+                    row = cursor.fetchone()
+                    if not row:
+                        logger.warning(
+                            f"Entry {entry_id} not found during migration, skipping"
+                        )
+                        continue
+
+                    old_blob = row["password_encrypted"]
+
+                    # Migrate: decrypt CBC → re-encrypt GCM
+                    # This uses the migrate_entry_to_gcm method which handles
+                    # version checking (skips entries already at v2)
+                    new_blob = encryption.migrate_entry_to_gcm(
+                        old_blob, master_password
+                    )
+
+                    # Update the database with the new v2 blob
+                    cursor.execute(
+                        "UPDATE passwords SET password_encrypted = ?, "
+                        "modified_at = CURRENT_TIMESTAMP "
+                        "WHERE entry_id = ? AND user_id = ?",
+                        (new_blob, entry_id, session.user_id),
+                    )
+
+                    migrated_count += 1
+
+                    # Report progress to the UI via callback
+                    if progress_callback:
+                        progress_callback(i + 1, total)
+
+                # Commit the transaction — all entries migrated successfully
+                conn.commit()
+
+            # Step 4: Invalidate password cache since encrypted blobs changed
+            if self._password_cache:
+                self._password_cache.invalidate_user(session.user_id)
+
+            logger.info(
+                f"Encryption migration complete: {migrated_count}/{total} entries "
+                f"migrated from v1 (CBC) to v2 (GCM)"
+            )
+            return migrated_count
+
+        except (InvalidSessionError, SessionExpiredError, MasterPasswordRequiredError):
+            raise
+        except Exception as e:
+            logger.error(f"Encryption migration failed: {e}")
+            raise PasswordManagerError(
+                f"Encryption migration failed: {e}. "
+                "No entries were modified (transaction rolled back). "
+                "Please try again."
+            )
+
     def bulk_decrypt_passwords(
         self, session_id: str, entry_ids: List[int], master_password: str
     ) -> Dict[int, str]:
@@ -1151,13 +1322,17 @@ class PasswordManagerCore:
 
         try:
             with self._cache_lock:
-                # Store master password securely in memory for session duration
-                # Note: This is stored in memory only and cleared when session ends
+                # Store master password securely in memory for session duration.
+                # Note: This is stored in memory only and cleared when session ends.
+                # The hash uses HMAC-SHA256 with the session_id as salt for
+                # timing-safe verification and cross-session isolation.
                 cache_entry = {
                     "master_password": master_password,  # Store actual password for encryption operations
-                    "password_hash": hashlib.sha256(
-                        master_password.encode("utf-8")
-                    ).hexdigest(),  # Keep hash for verification
+                    "password_hash": hmac.new(
+                        session_id.encode("utf-8"),
+                        master_password.encode("utf-8"),
+                        hashlib.sha256,
+                    ).hexdigest(),  # Salted HMAC hash for verification
                     "cached_at": datetime.now(),
                     "session_id": session_id,
                 }
@@ -1270,6 +1445,99 @@ class PasswordManagerCore:
         except Exception as e:
             logger.error(f"Failed to sort entries: {e}")
             return entries
+
+    @staticmethod
+    def filter_entries_by_age(
+        entries: List["PasswordEntry"], category: str
+    ) -> List["PasswordEntry"]:
+        """
+        Filter password entries by age category.
+
+        Age categories (defined in utils/password_age.py):
+        - "fresh": Password changed within the last 90 days (green)
+        - "moderate": Password is 90-180 days old (yellow)
+        - "old": Password is older than 180 days (red)
+        - "all": No filtering — return all entries
+
+        Entries without valid date fields are included by default so they
+        aren't silently dropped from the UI.
+
+        Args:
+            entries: List of PasswordEntry objects to filter
+            category: Age category to keep ("fresh", "moderate", "old", "all")
+
+        Returns:
+            Filtered list of entries matching the specified age category
+        """
+        if not _HAS_AGE_UTILS:
+            logger.warning("Age utilities not available — returning all entries")
+            return entries
+
+        if category.lower() == "all":
+            return entries
+
+        filtered = []
+        for entry in entries:
+            created_at = getattr(entry, "created_at", None)
+            modified_at = getattr(entry, "modified_at", None)
+
+            if created_at and modified_at:
+                try:
+                    age_days = calculate_age_days(created_at, modified_at)
+                    entry_category = get_age_category(age_days)
+                    if entry_category == category.lower():
+                        filtered.append(entry)
+                except Exception:
+                    # If age calculation fails, include the entry by default
+                    # so it doesn't silently disappear from the user's list.
+                    filtered.append(entry)
+            else:
+                # Missing date fields — include by default
+                filtered.append(entry)
+
+        return filtered
+
+    @staticmethod
+    def sort_entries_by_age(
+        entries: List["PasswordEntry"], oldest_first: bool = True
+    ) -> List["PasswordEntry"]:
+        """
+        Sort password entries by their age (days since last modification).
+
+        Uses the most recent of created_at/modified_at to determine age.
+        Entries without valid date fields are placed at the end of the list
+        with an effective age of 0.
+
+        Args:
+            entries: List of PasswordEntry objects to sort
+            oldest_first: If True, oldest entries come first (descending age).
+                          If False, newest entries come first (ascending age).
+
+        Returns:
+            Sorted list of entries
+        """
+        if not _HAS_AGE_UTILS:
+            logger.warning("Age utilities not available — returning unsorted")
+            return entries
+
+        entries_with_age = []
+        for entry in entries:
+            created_at = getattr(entry, "created_at", None)
+            modified_at = getattr(entry, "modified_at", None)
+
+            if created_at and modified_at:
+                try:
+                    age_days = calculate_age_days(created_at, modified_at)
+                    entries_with_age.append((entry, age_days))
+                except Exception:
+                    entries_with_age.append((entry, 0))
+            else:
+                entries_with_age.append((entry, 0))
+
+        # Sort by age: oldest_first means highest age_days first (reverse=True)
+        entries_with_age.sort(key=lambda x: x[1], reverse=oldest_first)
+
+        return [entry for entry, _ in entries_with_age]
 
     def get_cache_metrics(self) -> Optional[Dict[str, Any]]:
         """
